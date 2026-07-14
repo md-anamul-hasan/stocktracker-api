@@ -4,8 +4,27 @@ export async function scrapeDSE(env: Env) {
   const db = env.DB;
   
   try {
+    // --- Timezone & Holiday Validation ---
+    const now = new Date();
+    const bstFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const bstParts = bstFormatter.formatToParts(now);
+    const bstMap = {} as Record<string, string>;
+    for (const part of bstParts) { bstMap[part.type] = part.value; }
+    
+    if (bstMap.weekday === 'Friday' || bstMap.weekday === 'Saturday') {
+      console.log(`Skipping scraper: Today is ${bstMap.weekday} (Weekend in BD)`);
+      return;
+    }
+
+    const todayDate = `${bstMap.year}-${bstMap.month}-${bstMap.day}`;
+    const holidayCheck = await db.prepare('SELECT description FROM holidays WHERE holiday_date = ?').bind(todayDate).first<{description: string}>();
+    
+    if (holidayCheck) {
+      console.log(`Skipping scraper: Today is a holiday - ${holidayCheck.description}`);
+      return;
+    }
+
     console.log('Fetching live data from DSE...');
-    // DSE's scrolling ticker page contains all the latest prices
     const response = await fetch('https://www.dsebd.org/latest_share_price_scroll_l.php', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -18,8 +37,8 @@ export async function scrapeDSE(env: Env) {
 
     const html = await response.text();
     
-    // Parse the HTML using a highly efficient Regex for prices
-    const regex = /name=([A-Z0-9]+)[^>]*>\s*\1&nbsp;([\d\.]+)/g;
+    // Highly efficient Regex for prices. Supports arbitrary spaces to fix LHB bug.
+    const regex = /name=([A-Z0-9]+)[^>]*>\s*\1(?:&nbsp;|\s)+([\d\.]+)/g;
     let match;
     const scrapedPrices = new Map<string, number>();
 
@@ -33,7 +52,6 @@ export async function scrapeDSE(env: Env) {
 
     console.log(`Successfully parsed ${scrapedPrices.size} stock prices from DSE.`);
 
-    // Fetch only the active stocks we are tracking in our portfolio
     const activeStocks = await db.prepare("SELECT ticker FROM stocks WHERE status = 'active'").all<{ticker: string}>();
     
     const stmts = [];
@@ -47,35 +65,50 @@ export async function scrapeDSE(env: Env) {
             .bind(stock.ticker, livePrice, 'DSE_SCRAPER')
         );
 
-        // Additionally scrape the EPS from the company page
+        // Additionally scrape the EPS, P/E, and 52W range
         try {
           const compResponse = await fetch(`https://www.dsebd.org/displayCompany.php?name=${stock.ticker}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
           });
           if (compResponse.ok) {
             const compHtml = await compResponse.text();
-            // Regex to find Annual Basic EPS from the table
+            
+            let annualEps = 0;
             const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>\s*(?:<td[^>]*>[\d\.\-]+<\/td>\s*){4}<td[^>]*>([\d\.\-]+)<\/td>/is;
             const epsMatch = epsRegex.exec(compHtml);
-            if (epsMatch && epsMatch[1]) {
-              const annualEps = parseFloat(epsMatch[1]);
-              if (!isNaN(annualEps) && annualEps > 0) {
-                stmts.push(
-                  db.prepare('UPDATE stocks SET eps = ?, updated_at = datetime("now") WHERE ticker = ?')
-                    .bind(annualEps, stock.ticker)
-                );
-              }
+            if (epsMatch && epsMatch[1]) annualEps = parseFloat(epsMatch[1]);
+
+            let peRatio = 0;
+            const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>/is;
+            const peMatch = peRegex.exec(compHtml);
+            if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1]);
+
+            let low52 = 0;
+            let high52 = 0;
+            const rangeRegex = /52\s*Weeks.*?<\/th>\s*<td[^>]*>([\d\.\-]+)\s*-\s*([\d\.\-]+)<\/td>/is;
+            const rangeMatch = rangeRegex.exec(compHtml);
+            if (rangeMatch && rangeMatch[1] && rangeMatch[2]) {
+              low52 = parseFloat(rangeMatch[1]);
+              high52 = parseFloat(rangeMatch[2]);
+            }
+
+            // Only update if at least one value is parsed correctly to avoid wiping DB
+            if (!isNaN(annualEps) && !isNaN(peRatio)) {
+              stmts.push(
+                db.prepare('UPDATE stocks SET eps = ?, pe_ratio = ?, fifty_two_week_low = ?, fifty_two_week_high = ?, updated_at = datetime("now") WHERE ticker = ?')
+                  .bind(annualEps, peRatio, low52, high52, stock.ticker)
+              );
             }
           }
         } catch (e) {
-          console.error(`Failed to fetch EPS for ${stock.ticker}`, e);
+          console.error(`Failed to fetch fundamental data for ${stock.ticker}`, e);
         }
       }
     }
 
     if (stmts.length > 0) {
       await db.batch(stmts);
-      console.log(`Scraper successfully updated ${stmts.length} portfolio records (Prices & EPS).`);
+      console.log(`Scraper successfully updated ${stmts.length} portfolio records (Prices, P/E, 52W).`);
     } else {
       console.log('No active portfolio stocks found in the scraped data.');
     }

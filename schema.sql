@@ -11,7 +11,10 @@ CREATE TABLE IF NOT EXISTS stocks (
   sector TEXT NOT NULL,
   weight REAL NOT NULL DEFAULT 0,
   target_pe REAL NOT NULL,
+  pe_ratio REAL DEFAULT 0,
   eps REAL NOT NULL,
+  fifty_two_week_low REAL DEFAULT 0,
+  fifty_two_week_high REAL DEFAULT 0,
   estimated_yield REAL DEFAULT 0,
   investment_thesis TEXT,
   status TEXT NOT NULL DEFAULT 'active',
@@ -58,3 +61,11 @@ CREATE INDEX IF NOT EXISTS idx_stocks_status ON stocks(status);
 CREATE INDEX IF NOT EXISTS idx_price_data_ticker ON price_data(ticker);
 CREATE INDEX IF NOT EXISTS idx_price_data_fetched_at ON price_data(fetched_at);
 CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
+
+-- Holidays table for scraper schedule
+CREATE TABLE IF NOT EXISTS holidays (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  holiday_date TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);

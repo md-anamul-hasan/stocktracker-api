@@ -18,8 +18,7 @@ export async function scrapeDSE(env: Env) {
 
     const html = await response.text();
     
-    // Parse the HTML using a highly efficient Regex
-    // The HTML looks like this: <a href="displayCompany.php?name=1JANATAMF" class='abhead' target='_top'>1JANATAMF&nbsp;3.40&nbsp;...
+    // Parse the HTML using a highly efficient Regex for prices
     const regex = /name=([A-Z0-9]+)[^>]*>\s*\1&nbsp;([\d\.]+)/g;
     let match;
     const scrapedPrices = new Map<string, number>();
@@ -47,12 +46,36 @@ export async function scrapeDSE(env: Env) {
           db.prepare('INSERT INTO price_data (ticker, current_price, source) VALUES (?, ?, ?)')
             .bind(stock.ticker, livePrice, 'DSE_SCRAPER')
         );
+
+        // Additionally scrape the EPS from the company page
+        try {
+          const compResponse = await fetch(`https://www.dsebd.org/displayCompany.php?name=${stock.ticker}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          if (compResponse.ok) {
+            const compHtml = await compResponse.text();
+            // Regex to find Annual Basic EPS from the table
+            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>\s*(?:<td[^>]*>[\d\.\-]+<\/td>\s*){4}<td[^>]*>([\d\.\-]+)<\/td>/is;
+            const epsMatch = epsRegex.exec(compHtml);
+            if (epsMatch && epsMatch[1]) {
+              const annualEps = parseFloat(epsMatch[1]);
+              if (!isNaN(annualEps) && annualEps > 0) {
+                stmts.push(
+                  db.prepare('UPDATE stocks SET eps = ?, updated_at = datetime("now") WHERE ticker = ?')
+                    .bind(annualEps, stock.ticker)
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to fetch EPS for ${stock.ticker}`, e);
+        }
       }
     }
 
     if (stmts.length > 0) {
       await db.batch(stmts);
-      console.log(`Scraper successfully updated ${stmts.length} portfolio stocks.`);
+      console.log(`Scraper successfully updated ${stmts.length} portfolio records (Prices & EPS).`);
     } else {
       console.log('No active portfolio stocks found in the scraped data.');
     }

@@ -28,21 +28,24 @@ stocks.get('/screener', async (c) => {
   const db = c.env.DB;
   
   const result = await db.prepare(`
-    SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe,
-           (s.eps * s.target_pe) as target_price,
-           COALESCE(p.current_price, s.eps * s.target_pe) as current_price
-    FROM stocks s
-    LEFT JOIN (
-      SELECT ticker, current_price
-      FROM price_data
-      WHERE id IN (
-        SELECT MAX(id) FROM price_data GROUP BY ticker
-      )
-    ) p ON s.ticker = p.ticker
-    WHERE s.status = 'active'
-  `).all();
+      SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.weight, s.estimated_yield, s.investment_thesis,
+             (s.eps * s.target_pe) as target_price,
+             COALESCE(p.current_price, s.eps * s.target_pe) as current_price
+      FROM stocks s
+      LEFT JOIN price_data p ON s.ticker = p.ticker
+      WHERE s.status = 'active'
+      ORDER BY p.fetched_at DESC
+    `).all();
 
-  return c.json(result.results);
+    // The query might return multiple rows per ticker due to join, let's group by ticker and take the latest
+    const uniqueStocks = new Map();
+    for (const row of result.results) {
+      if (!uniqueStocks.has(row.ticker)) {
+        uniqueStocks.set(row.ticker, row);
+      }
+    }
+
+    return c.json(Array.from(uniqueStocks.values()));
 });
 
 export default stocks;

@@ -1,0 +1,21 @@
+{
+  "name": "stocktracker-api",
+  "version": "1.0.0",
+  "description": "Bangladesh Stock Tracker API - Hono on Cloudflare Workers",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute stocktracker-db --local --file=./schema.sql",
+    "db:seed": "wrangler d1 execute stocktracker-db --local --file=./seed.sql",
+    "db:reset": "npm run db:init && npm run db:seed"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}

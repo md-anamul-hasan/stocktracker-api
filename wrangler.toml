@@ -9,7 +9,7 @@ crons = ["*/5 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "stocktracker-db"
-database_id = "local"
+database_id = "e5a97f51-35a1-42cd-b6ad-e55e95fa21cd"
 
 [vars]
 JWT_SECRET = "stocktracker-jwt-secret-change-in-production"

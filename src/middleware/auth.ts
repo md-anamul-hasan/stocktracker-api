@@ -9,11 +9,14 @@ export const authMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) 
   }
 
   const token = authHeader.split(' ')[1];
+  let payload;
+  console.log('JWT_SECRET IS:', c.env.JWT_SECRET);
   try {
-    const payload = await verify(token, c.env.JWT_SECRET);
-    c.set('jwtPayload', payload);
-    await next();
+    payload = await verify(token, c.env.JWT_SECRET, 'HS256');
   } catch (error) {
     return c.json({ error: 'Invalid or expired token' }, 401);
   }
+  
+  c.set('jwtPayload', payload);
+  await next();
 };

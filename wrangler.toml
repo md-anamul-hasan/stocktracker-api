@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [triggers]
 crons = [
-  "5,15,25,35,45,55 4-7 * * *",
-  "5 8 * * *"
+  "*/5 4-8 * * *",
+  "0 9 * * *"
 ]
 
 [[d1_databases]]

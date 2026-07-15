@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env, Stock } from '../types';
 import { authMiddleware } from '../middleware/auth';
+import { scrapeDSE } from '../services/scraper';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -41,6 +42,10 @@ admin.post('/stocks', async (c) => {
     );
 
     await stmt.run();
+    
+    // Trigger background scraper for this specific stock
+    c.executionCtx.waitUntil(scrapeDSE(c.env, body.ticker));
+
     return c.json({ success: true }, 201);
   } catch (error) {
     return c.json({ error: 'Internal Server Error' }, 500);

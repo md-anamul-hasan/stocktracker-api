@@ -1,33 +1,40 @@
 import { Env } from '../types';
 import pLimit from 'p-limit';
 
-export async function scrapeDSE(env: Env) {
+export async function scrapeDSE(env: Env, specificTicker?: string) {
   const db = env.DB;
   
   try {
-    // --- Timezone & Holiday Validation ---
-    const now = new Date();
-    const bstFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
-    const bstParts = bstFormatter.formatToParts(now);
-    const bstMap = {} as Record<string, string>;
-    for (const part of bstParts) { bstMap[part.type] = part.value; }
-    
-    if (bstMap.weekday === 'Friday' || bstMap.weekday === 'Saturday') {
-      console.log(`Skipping scraper: Today is ${bstMap.weekday} (Weekend in BD)`);
-      return;
+    if (!specificTicker) {
+      // --- Timezone & Holiday Validation ---
+      const now = new Date();
+      const bstFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const bstParts = bstFormatter.formatToParts(now);
+      const bstMap = {} as Record<string, string>;
+      for (const part of bstParts) { bstMap[part.type] = part.value; }
+      
+      if (bstMap.weekday === 'Friday' || bstMap.weekday === 'Saturday') {
+        console.log(`Skipping scraper: Today is ${bstMap.weekday} (Weekend in BD)`);
+        return;
+      }
+
+      const todayDate = `${bstMap.year}-${bstMap.month}-${bstMap.day}`;
+      const holidayCheck = await db.prepare('SELECT description FROM holidays WHERE holiday_date = ?').bind(todayDate).first<{description: string}>();
+      
+      if (holidayCheck) {
+        console.log(`Skipping scraper: Today is a holiday - ${holidayCheck.description}`);
+        return;
+      }
     }
 
-    const todayDate = `${bstMap.year}-${bstMap.month}-${bstMap.day}`;
-    const holidayCheck = await db.prepare('SELECT description FROM holidays WHERE holiday_date = ?').bind(todayDate).first<{description: string}>();
-    
-    if (holidayCheck) {
-      console.log(`Skipping scraper: Today is a holiday - ${holidayCheck.description}`);
-      return;
+    console.log(specificTicker ? `Fetching live data for ${specificTicker}...` : 'Fetching live data from Amarstock API...');
+
+    let allStocks;
+    if (specificTicker) {
+      allStocks = { results: [{ ticker: specificTicker, sector: 'Unknown', status: 'active' }] };
+    } else {
+      allStocks = await db.prepare("SELECT ticker, sector, status FROM stocks WHERE status = 'active'").all<{ticker: string, sector: string, status: string}>();
     }
-
-    console.log('Fetching live data from Amarstock API...');
-
-    const allStocks = await db.prepare("SELECT ticker, sector, status FROM stocks WHERE status = 'active'").all<{ticker: string, sector: string, status: string}>();
     
     const stmts: any[] = [];
     const limit = pLimit(5); // Process up to 5 stocks concurrently

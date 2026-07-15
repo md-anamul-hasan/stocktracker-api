@@ -28,13 +28,12 @@ stocks.get('/screener', async (c) => {
   const db = c.env.DB;
   
   const result = await db.prepare(`
-      SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.weight, s.estimated_yield, s.investment_thesis,
+      SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.weight, s.estimated_yield, s.investment_thesis, s.status,
              s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
              (s.eps * s.target_pe) as target_price,
              COALESCE(p.current_price, s.eps * s.target_pe) as current_price
       FROM stocks s
       LEFT JOIN price_data p ON s.ticker = p.ticker
-      WHERE s.status = 'active'
       ORDER BY p.fetched_at DESC
     `).all();
 

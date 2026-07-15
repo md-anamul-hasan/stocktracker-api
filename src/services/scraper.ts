@@ -1,5 +1,4 @@
 import { Env } from '../types';
-import * as cheerio from 'cheerio';
 import pLimit from 'p-limit';
 
 export async function scrapeDSE(env: Env) {
@@ -26,33 +25,7 @@ export async function scrapeDSE(env: Env) {
       return;
     }
 
-    console.log('Fetching live data from DSE...');
-    const response = await fetch('https://www.dsebd.org/latest_share_price_scroll_l.php', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch DSE data: ${response.status} ${response.statusText}`);
-    }
-
-    const html = await response.text();
-    
-    // Highly efficient Regex for prices. Supports arbitrary spaces to fix LHB bug.
-    const regex = /name=([A-Z0-9]+)[^>]*>\s*\1(?:&nbsp;|\s)+([\d\.]+)/g;
-    let match;
-    const scrapedPrices = new Map<string, number>();
-
-    while ((match = regex.exec(html)) !== null) {
-      const ticker = match[1];
-      const price = parseFloat(match[2]);
-      if (!isNaN(price) && price > 0) {
-        scrapedPrices.set(ticker, price);
-      }
-    }
-
-    console.log(`Successfully parsed ${scrapedPrices.size} stock prices from DSE.`);
+    console.log('Fetching live data from Amarstock API...');
 
     const allStocks = await db.prepare("SELECT ticker, status FROM stocks WHERE status = 'active'").all<{ticker: string, status: string}>();
     
@@ -60,130 +33,93 @@ export async function scrapeDSE(env: Env) {
     const limit = pLimit(5); // Process up to 5 stocks concurrently
     
     const scrapeTasks = allStocks.results.map(stock => limit(async () => {
-      if (scrapedPrices.has(stock.ticker)) {
-        const livePrice = scrapedPrices.get(stock.ticker)!;
-        
-        stmts.push(
-          db.prepare('INSERT INTO price_data (ticker, current_price, source) VALUES (?, ?, ?)')
-            .bind(stock.ticker, livePrice, 'DSE_SCRAPER')
-        );
+      try {
+        const response = await fetch(`https://www.amarstock.com/data/11bfa580-3cc4a8b9e57d/${stock.ticker}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
 
-        // Additionally scrape the EPS, P/E, and 52W range along with NAV and Dividend
-        try {
-          const compResponse = await fetch(`https://www.dsebd.org/displayCompany.php?name=${stock.ticker}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-          });
-          if (compResponse.ok) {
-            const compHtml = await compResponse.text();
+        if (response.ok) {
+          const json = await response.json() as any;
+          const currentPrice = json.ac || 0;
+          
+          if (currentPrice > 0) {
+            stmts.push(
+              db.prepare('INSERT INTO price_data (ticker, current_price, source) VALUES (?, ?, ?)')
+                .bind(stock.ticker, currentPrice, 'AMARSTOCK')
+            );
             
-            // We load cheerio to safely query DOM instead of regex
-            // Note: Since this is a worker, we must ensure cheerio is imported at the top of the file
-            // Let's assume we've imported it.
-            const $ = cheerio.load(compHtml);
-
-            let annualEps = 0;
-            let peRatio = 0;
-            let nav = 0;
-            let dividendPercent = 0;
+            // Extract 52W Low/High
             let low52 = 0;
             let high52 = 0;
-            let nocfps = 0;
-            const faceValue = 10; // Hardcoded to 10 for DSE/CSE as per user requirements
-
-            // 2. Scrape 52-week range
-            const rangeRegex = /52\s*Weeks.*?<\/th>\s*<td[^>]*>([\d\.\-,]+)\s*-\s*([\d\.\-,]+)<\/td>/is;
-            const rangeMatch = rangeRegex.exec(compHtml);
-            if (rangeMatch && rangeMatch[1] && rangeMatch[2]) {
-              low52 = parseFloat(rangeMatch[1].replace(/,/g, ''));
-              high52 = parseFloat(rangeMatch[2].replace(/,/g, ''));
+            if (json.ah && json.ah.includes('-')) {
+              const parts = json.ah.split('-');
+              low52 = parseFloat(parts[0].trim());
+              high52 = parseFloat(parts[1].trim());
             }
 
-            // 1. Better EPS parsing: grab from the Audited "Earnings Per Share (EPS)" top table
-            const epsRegex = /Earnings Per Share \(EPS\)(?: - continuing operations)?<\/td>\s*<\/tr>\s*<tr[^>]*>\s*<td>Basic<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
-            const epsMatch = epsRegex.exec(compHtml);
-            if (epsMatch && epsMatch[1]) {
-                annualEps = parseFloat(epsMatch[1].replace(/,/g, ''));
-            }
-
-            // 2. Scrape Fundamentals from Data Tables (Fallback and NAV/Dividend/NOCFPS)
-            $('table#company').each((i, table) => {
-                const html = $(table).html() || '';
-                
-                // Financial Performance (NAV, NOCFPS and fallback EPS)
-                if (html.includes('NAV Per Share') && html.includes('Earnings per share(EPS)')) {
-                    const rows = $(table).find('tr:not(.header)');
-                    const lastRow = rows.last();
-                    const tds = lastRow.find('td');
-                    
-                    const epsText = tds.eq(4).text().trim();
-                    const navText = tds.eq(7).text().trim();
-                    const nocfpsText = tds.eq(10).text().trim();
-                    
-                    if (annualEps === 0 && epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
-                    if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
-                    if (nocfpsText && nocfpsText !== '-') nocfps = parseFloat(nocfpsText.replace(/,/g, ''));
-                }
-
-                // Dividend Parsing
-                if (html.includes('Dividend Yield in %') && html.includes('Year end Price Earnings')) {
-                    const rows = $(table).find('tr:not(.header)');
-                    // Iterate backwards to find the last valid dividend
-                    for (let r = rows.length - 1; r >= 0; r--) {
-                        const tds = $(rows[r]).find('td');
-                        const divText = tds.eq(7).text().trim();
-                        if (divText && divText !== '-') {
-                            const val = parseFloat(divText.replace(/,/g, ''));
-                            if (val > 0) {
-                                dividendPercent = val;
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Calculate PE Ratio dynamically instead of relying on DSE's broken table math
-            if (annualEps > 0 && livePrice > 0) {
-                peRatio = livePrice / annualEps;
-            } else {
-                peRatio = 0;
-            }
-
+            const eps = json.cb || 0;
+            const peRatio = json.cd || (eps > 0 ? currentPrice / eps : 0);
+            const nav = json.ci || 0;
+            const nocfps = json.cj || 0;
+            
+            // Convert auth_cap from millions to crores
+            const rawAuthCap = json.ap || 0;
+            const authCapCr = rawAuthCap / 10; 
+            
+            const listedYear = json.au || null;
+            const category = json.av || null;
+            const dividendYield = json.cm || 0;
+            
             // Calculate Derived Metrics
+            const faceValue = 10;
+            let dividendPercent = 0;
+            if (json.dz) {
+              const match = json.dz.match(/(\d+(?:\.\d+)?)%/);
+              if (match) {
+                dividendPercent = parseFloat(match[1]);
+              }
+            }
             let dps = 0;
             if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);
 
             let roe = 0;
-            if (nav !== 0 && annualEps !== 0) roe = (annualEps / nav); // Kept as decimal
+            if (nav !== 0 && eps !== 0) roe = (eps / nav);
 
             let payoutRatio = 0;
-            if (annualEps > 0 && dps > 0) payoutRatio = (dps / annualEps);
+            if (eps > 0 && dps > 0) payoutRatio = (dps / eps);
 
-            // Only update if at least one core value is parsed correctly to avoid wiping DB
-            // (If EPS is perfectly 0, it likely failed to parse)
-            if (annualEps !== 0 && !isNaN(annualEps) && !isNaN(peRatio)) {
-              stmts.push(
-                db.prepare(`
-                  UPDATE stocks SET 
-                    eps = ?, 
-                    pe_ratio = ?, 
-                    bvps = ?,
-                    nocfps = ?, 
-                    dps = ?, 
-                    roe = ?, 
-                    payout_ratio = ?, 
-                    fifty_two_week_low = ?, 
-                    fifty_two_week_high = ?, 
-                    updated_at = datetime("now") 
-                  WHERE ticker = ?
-                `)
-                  .bind(annualEps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, stock.ticker)
-              );
-            }
+            stmts.push(
+              db.prepare(`
+                UPDATE stocks SET 
+                  company_name = ?,
+                  eps = ?, 
+                  pe_ratio = ?, 
+                  bvps = ?,
+                  nocfps = ?, 
+                  dps = ?, 
+                  roe = ?, 
+                  payout_ratio = ?, 
+                  fifty_two_week_low = ?, 
+                  fifty_two_week_high = ?, 
+                  auth_cap = ?,
+                  listed_year = ?,
+                  category = ?,
+                  dividend_yield = ?,
+                  updated_at = datetime("now") 
+                WHERE ticker = ?
+              `)
+                .bind(
+                  json.ab || stock.ticker,
+                  eps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, 
+                  authCapCr, listedYear, category, dividendYield, stock.ticker
+                )
+            );
           }
-        } catch (e) {
-          console.error(`Failed to fetch fundamental data for ${stock.ticker}`, e);
         }
+      } catch (e) {
+        console.error(`Failed to fetch data for ${stock.ticker}`, e);
       }
     }));
 
@@ -191,7 +127,7 @@ export async function scrapeDSE(env: Env) {
 
     if (stmts.length > 0) {
       await db.batch(stmts);
-      console.log(`Scraper successfully updated ${stmts.length} portfolio records (Prices, P/E, 52W).`);
+      console.log(`Scraper successfully updated ${stmts.length / 2} portfolio records from Amarstock.`);
     } else {
       console.log('No active portfolio stocks found in the scraped data.');
     }

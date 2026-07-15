@@ -37,6 +37,7 @@ stocks.get('/screener', async (c) => {
         SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.weight, s.estimated_yield, s.investment_thesis, s.status,
                 s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
                 s.bvps, s.nocfps, s.dps, s.roe, s.payout_ratio, s.req_rate_of_return, s.risk_free_rate, s.growth_rate,
+                s.auth_cap, s.listed_year, s.category, s.dividend_yield,
                 COALESCE(p.current_price, s.eps * s.target_pe) as current_price
         FROM stocks s
         LEFT JOIN (

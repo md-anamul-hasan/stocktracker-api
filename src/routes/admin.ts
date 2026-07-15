@@ -21,7 +21,7 @@ admin.post('/stocks', async (c) => {
     const body = await c.req.json();
     const db = c.env.DB;
     
-    if (!body.ticker || !body.company_name || !body.sector || body.weight === undefined || body.target_pe === undefined || body.eps === undefined) {
+    if (!body.ticker || body.weight === undefined || body.target_pe === undefined) {
       return c.json({ error: 'Missing required fields' }, 400);
     }
     
@@ -33,8 +33,8 @@ admin.post('/stocks', async (c) => {
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
-      body.pe_ratio || 0, body.eps, 
+      body.ticker, body.company_name || 'Pending Data', body.sector || 'Pending', body.weight, body.target_pe, 
+      body.pe_ratio || 0, body.eps || 0, 
       body.fifty_two_week_low || 0, body.fifty_two_week_high || 0, 
       body.investment_thesis, body.status, 
       body.shariah_compliant ? 1 : 0
@@ -53,7 +53,7 @@ admin.put('/stocks/:id', async (c) => {
     const body = await c.req.json();
     const db = c.env.DB;
     
-    if (!body.ticker || !body.company_name || !body.sector || body.weight === undefined || body.target_pe === undefined || body.eps === undefined) {
+    if (!body.ticker || body.weight === undefined || body.target_pe === undefined) {
       return c.json({ error: 'Missing required fields' }, 400);
     }
     
@@ -65,8 +65,8 @@ admin.put('/stocks/:id', async (c) => {
         shariah_compliant = ?, updated_at = datetime('now')
       WHERE id = ?
     `).bind(
-      body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
-      body.pe_ratio || 0, body.eps, 
+      body.ticker, body.company_name || 'Pending Data', body.sector || 'Pending', body.weight, body.target_pe, 
+      body.pe_ratio || 0, body.eps || 0, 
       body.fifty_two_week_low || 0, body.fifty_two_week_high || 0,
       body.investment_thesis, body.status, 
       body.shariah_compliant ? 1 : 0, id

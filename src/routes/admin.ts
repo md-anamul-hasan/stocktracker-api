@@ -85,11 +85,25 @@ admin.put('/stocks/:id', async (c) => {
 });
 
 admin.delete('/stocks/:id', async (c) => {
-  const id = c.req.param('id');
-  const db = c.env.DB;
-  
-  await db.prepare('DELETE FROM stocks WHERE id = ?').bind(id).run();
-  return c.json({ success: true });
+  try {
+    const id = c.req.param('id');
+    const db = c.env.DB;
+    
+    // First find the stock to get its ticker
+    const stock: any = await db.prepare('SELECT ticker FROM stocks WHERE id = ?').bind(id).first();
+    
+    if (stock) {
+      // Delete associated price data first to prevent foreign key constraint errors
+      await db.prepare('DELETE FROM price_data WHERE ticker = ?').bind(stock.ticker).run();
+      // Then delete the stock
+      await db.prepare('DELETE FROM stocks WHERE id = ?').bind(id).run();
+    }
+    
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to delete stock:', error);
+    return c.json({ error: 'Failed to delete stock', details: error.message }, 500);
+  }
 });
 
 // Holidays CRUD

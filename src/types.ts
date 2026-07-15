@@ -13,6 +13,12 @@ export interface Stock {
   target_pe: number;
   pe_ratio: number;
   eps: number;
+  bvps: number;
+  dps: number;
+  roe: number;
+  payout_ratio: number;
+  req_rate_of_return: number;
+  growth_rate: number;
   fifty_two_week_low: number;
   fifty_two_week_high: number;
   estimated_yield: number;

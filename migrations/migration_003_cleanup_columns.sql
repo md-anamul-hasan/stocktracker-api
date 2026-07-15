@@ -1,0 +1,9 @@
+ALTER TABLE stocks DROP COLUMN bvps;
+ALTER TABLE stocks DROP COLUMN nocfps;
+ALTER TABLE stocks DROP COLUMN dps;
+ALTER TABLE stocks DROP COLUMN roe;
+ALTER TABLE stocks DROP COLUMN payout_ratio;
+ALTER TABLE stocks DROP COLUMN req_rate_of_return;
+ALTER TABLE stocks DROP COLUMN risk_free_rate;
+ALTER TABLE stocks DROP COLUMN growth_rate;
+ALTER TABLE stocks DROP COLUMN estimated_yield;

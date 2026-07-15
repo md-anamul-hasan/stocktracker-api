@@ -27,7 +27,7 @@ export async function scrapeDSE(env: Env) {
 
     console.log('Fetching live data from Amarstock API...');
 
-    const allStocks = await db.prepare("SELECT ticker, status FROM stocks WHERE status = 'active'").all<{ticker: string, status: string}>();
+    const allStocks = await db.prepare("SELECT ticker, sector, status FROM stocks WHERE status = 'active'").all<{ticker: string, sector: string, status: string}>();
     
     const stmts: any[] = [];
     const limit = pLimit(5); // Process up to 5 stocks concurrently
@@ -61,9 +61,6 @@ export async function scrapeDSE(env: Env) {
 
             const eps = json.cb || 0;
             const peRatio = json.cd || (eps > 0 ? currentPrice / eps : 0);
-            const nav = json.ci || 0;
-            const nocfps = json.cj || 0;
-            
             // Convert auth_cap from millions to crores
             const rawAuthCap = json.ap || 0;
             const authCapCr = rawAuthCap / 10; 
@@ -71,36 +68,14 @@ export async function scrapeDSE(env: Env) {
             const listedYear = json.au || null;
             const category = json.av || null;
             const dividendYield = json.cm || 0;
-            
-            // Calculate Derived Metrics
-            const faceValue = 10;
-            let dividendPercent = 0;
-            if (json.dz) {
-              const match = json.dz.match(/(\d+(?:\.\d+)?)%/);
-              if (match) {
-                dividendPercent = parseFloat(match[1]);
-              }
-            }
-            let dps = 0;
-            if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);
-
-            let roe = 0;
-            if (nav !== 0 && eps !== 0) roe = (eps / nav);
-
-            let payoutRatio = 0;
-            if (eps > 0 && dps > 0) payoutRatio = (dps / eps);
 
             stmts.push(
               db.prepare(`
                 UPDATE stocks SET 
                   company_name = ?,
+                  sector = ?,
                   eps = ?, 
                   pe_ratio = ?, 
-                  bvps = ?,
-                  nocfps = ?, 
-                  dps = ?, 
-                  roe = ?, 
-                  payout_ratio = ?, 
                   fifty_two_week_low = ?, 
                   fifty_two_week_high = ?, 
                   auth_cap = ?,
@@ -112,7 +87,8 @@ export async function scrapeDSE(env: Env) {
               `)
                 .bind(
                   json.ab || stock.ticker,
-                  eps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, 
+                  json.dp || stock.sector || 'Unknown',
+                  eps, peRatio, low52, high52, 
                   authCapCr, listedYear, category, dividendYield, stock.ticker
                 )
             );

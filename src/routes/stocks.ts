@@ -49,12 +49,9 @@ stocks.get('/screener', async (c) => {
         // Value = FCFE * (1 + g) / (r - g)
         const ddm_denom = r - g;
         let target_price_fcfe = null;
-        if (ddm_denom > 0 && row.nocfps) {
+        if (ddm_denom > 0 && row.nocfps > 0) {
             target_price_fcfe = (row.nocfps * (1 + g)) / ddm_denom;
             if (target_price_fcfe < 0) target_price_fcfe = 0;
-        } else if (ddm_denom > 0 && row.dps) {
-            // Fallback to DDM if NOCFPS is missing/zero
-            target_price_fcfe = row.dps / ddm_denom; 
         }
         
         // 2. Justified P/E

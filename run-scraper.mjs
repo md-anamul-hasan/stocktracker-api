@@ -64,50 +64,54 @@ async function runScraper() {
             high52 = parseFloat(rangeMatch[2].replace(/,/g, ''));
           }
 
-          $('table#company').each((i, table) => {
-              const tableHtml = $(table).html() || '';
-              if (tableHtml.includes('NAV Per Share') && tableHtml.includes('Earnings per share(EPS)')) {
-                  const rows = $(table).find('tr:not(.header)');
-                  const lastRow = rows.last();
-                  const tds = lastRow.find('td');
-                  
-                  const epsText = tds.eq(4).text().trim();
-                  const navText = tds.eq(7).text().trim();
-                  const nocfpsText = tds.eq(10).text().trim();
-                  
-                  if (epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
-                  if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
-                  if (nocfpsText && nocfpsText !== '-') nocfps = parseFloat(nocfpsText.replace(/,/g, ''));
-              }
-              if (tableHtml.includes('Dividend Yield in %') && tableHtml.includes('Year end Price Earnings')) {
-                  const rows = $(table).find('tr:not(.header)');
-                  const lastRow = rows.last();
-                  const tds = lastRow.find('td');
-                  const peText = tds.eq(4).text().trim();
-                  const divText = tds.eq(7).text().trim();
-                  if (peText && peText !== '-') peRatio = parseFloat(peText.replace(/,/g, ''));
-                  if (divText && divText !== '-') dividendPercent = parseFloat(divText.replace(/,/g, ''));
-              }
-          });
-
-          if (annualEps === 0) {
-            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>(.*?)<\/tr>/is;
+            // 1. Better EPS parsing: grab from the Audited "Earnings Per Share (EPS)" top table
+            const epsRegex = /Earnings Per Share \(EPS\)(?: - continuing operations)?<\/td>\s*<\/tr>\s*<tr[^>]*>\s*<td>Basic<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
             const epsMatch = epsRegex.exec(compHtml);
             if (epsMatch && epsMatch[1]) {
-                const tds = epsMatch[1].match(/<td[^>]*>\s*(-?\d[\d\.,]*)\s*<\/td>/gi);
-                if (tds && tds.length > 0) {
-                    const lastTd = tds[tds.length - 1];
-                    const numMatch = lastTd.match(/(-?\d[\d\.,]*)/);
-                    if (numMatch) annualEps = parseFloat(numMatch[1].replace(/,/g, ''));
-                }
+                annualEps = parseFloat(epsMatch[1].replace(/,/g, ''));
             }
-          }
 
-          if (peRatio === 0) {
-            const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
-            const peMatch = peRegex.exec(compHtml);
-            if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1].replace(/,/g, ''));
-          }
+            // 2. Scrape Fundamentals from Data Tables (Fallback and NAV/Dividend)
+            $('table#company').each((i, table) => {
+                const html = $(table).html() || '';
+                
+                // Financial Performance (NAV and fallback EPS)
+                if (html.includes('NAV Per Share') && html.includes('Earnings per share(EPS)')) {
+                    const rows = $(table).find('tr:not(.header)');
+                    const lastRow = rows.last();
+                    const tds = lastRow.find('td');
+                    
+                    const epsText = tds.eq(4).text().trim();
+                    const navText = tds.eq(7).text().trim();
+                    
+                    if (annualEps === 0 && epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
+                    if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
+                }
+
+                // Dividend Parsing
+                if (html.includes('Dividend Yield in %') && html.includes('Year end Price Earnings')) {
+                    const rows = $(table).find('tr:not(.header)');
+                    // Iterate backwards to find the last valid dividend
+                    for (let r = rows.length - 1; r >= 0; r--) {
+                        const tds = $(rows[r]).find('td');
+                        const divText = tds.eq(7).text().trim();
+                        if (divText && divText !== '-') {
+                            const val = parseFloat(divText.replace(/,/g, ''));
+                            if (val > 0) {
+                                dividendPercent = val;
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Calculate PE Ratio dynamically instead of relying on DSE's broken table math
+            if (annualEps > 0 && livePrice > 0) {
+                peRatio = livePrice / annualEps;
+            } else {
+                peRatio = 0;
+            }
 
           let dps = 0;
           if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);

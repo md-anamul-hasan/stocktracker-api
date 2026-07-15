@@ -82,7 +82,6 @@ export async function scrapeDSE(env: Env) {
             let annualEps = 0;
             let peRatio = 0;
             let nav = 0;
-            let nocfps = 0;
             let dividendPercent = 0;
             let low52 = 0;
             let high52 = 0;
@@ -115,11 +114,9 @@ export async function scrapeDSE(env: Env) {
                     
                     const epsText = tds.eq(4).text().trim();
                     const navText = tds.eq(7).text().trim();
-                    const nocfpsText = tds.eq(10).text().trim();
                     
                     if (epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
                     if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
-                    if (nocfpsText && nocfpsText !== '-') nocfps = parseFloat(nocfpsText.replace(/,/g, ''));
                 }
 
                 // Financial Performance Continued (P/E & Dividend)
@@ -175,7 +172,6 @@ export async function scrapeDSE(env: Env) {
                     eps = ?, 
                     pe_ratio = ?, 
                     bvps = ?, 
-                    nocfps = ?,
                     dps = ?, 
                     roe = ?, 
                     payout_ratio = ?, 
@@ -184,7 +180,7 @@ export async function scrapeDSE(env: Env) {
                     updated_at = datetime("now") 
                   WHERE ticker = ?
                 `)
-                  .bind(annualEps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, stock.ticker)
+                  .bind(annualEps, peRatio, nav, dps, roe, payoutRatio, low52, high52, stock.ticker)
               );
             }
           }

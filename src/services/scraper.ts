@@ -74,22 +74,22 @@ export async function scrapeDSE(env: Env) {
             const compHtml = await compResponse.text();
             
             let annualEps = 0;
-            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>\s*(?:<td[^>]*>[\d\.\-]+<\/td>\s*){4}<td[^>]*>([\d\.\-]+)<\/td>/is;
+            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>\s*(?:<td[^>]*>[\d\.\-,]+<\/td>\s*){4}<td[^>]*>([\d\.\-,]+)<\/td>/is;
             const epsMatch = epsRegex.exec(compHtml);
-            if (epsMatch && epsMatch[1]) annualEps = parseFloat(epsMatch[1]);
+            if (epsMatch && epsMatch[1]) annualEps = parseFloat(epsMatch[1].replace(/,/g, ''));
 
             let peRatio = 0;
-            const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>/is;
+            const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
             const peMatch = peRegex.exec(compHtml);
-            if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1]);
+            if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1].replace(/,/g, ''));
 
             let low52 = 0;
             let high52 = 0;
-            const rangeRegex = /52\s*Weeks.*?<\/th>\s*<td[^>]*>([\d\.\-]+)\s*-\s*([\d\.\-]+)<\/td>/is;
+            const rangeRegex = /52\s*Weeks.*?<\/th>\s*<td[^>]*>([\d\.\-,]+)\s*-\s*([\d\.\-,]+)<\/td>/is;
             const rangeMatch = rangeRegex.exec(compHtml);
             if (rangeMatch && rangeMatch[1] && rangeMatch[2]) {
-              low52 = parseFloat(rangeMatch[1]);
-              high52 = parseFloat(rangeMatch[2]);
+              low52 = parseFloat(rangeMatch[1].replace(/,/g, ''));
+              high52 = parseFloat(rangeMatch[2].replace(/,/g, ''));
             }
 
             // Only update if at least one value is parsed correctly to avoid wiping DB

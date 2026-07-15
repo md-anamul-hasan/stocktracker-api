@@ -85,6 +85,7 @@ export async function scrapeDSE(env: Env) {
             let dividendPercent = 0;
             let low52 = 0;
             let high52 = 0;
+            let nocfps = 0;
             const faceValue = 10; // Hardcoded to 10 for DSE/CSE as per user requirements
 
             // 2. Scrape 52-week range
@@ -102,11 +103,11 @@ export async function scrapeDSE(env: Env) {
                 annualEps = parseFloat(epsMatch[1].replace(/,/g, ''));
             }
 
-            // 2. Scrape Fundamentals from Data Tables (Fallback and NAV/Dividend)
+            // 2. Scrape Fundamentals from Data Tables (Fallback and NAV/Dividend/NOCFPS)
             $('table#company').each((i, table) => {
                 const html = $(table).html() || '';
                 
-                // Financial Performance (NAV and fallback EPS)
+                // Financial Performance (NAV, NOCFPS and fallback EPS)
                 if (html.includes('NAV Per Share') && html.includes('Earnings per share(EPS)')) {
                     const rows = $(table).find('tr:not(.header)');
                     const lastRow = rows.last();
@@ -114,9 +115,11 @@ export async function scrapeDSE(env: Env) {
                     
                     const epsText = tds.eq(4).text().trim();
                     const navText = tds.eq(7).text().trim();
+                    const nocfpsText = tds.eq(10).text().trim();
                     
                     if (annualEps === 0 && epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
                     if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
+                    if (nocfpsText && nocfpsText !== '-') nocfps = parseFloat(nocfpsText.replace(/,/g, ''));
                 }
 
                 // Dividend Parsing
@@ -161,7 +164,8 @@ export async function scrapeDSE(env: Env) {
                   UPDATE stocks SET 
                     eps = ?, 
                     pe_ratio = ?, 
-                    bvps = ?, 
+                    bvps = ?,
+                    nocfps = ?, 
                     dps = ?, 
                     roe = ?, 
                     payout_ratio = ?, 
@@ -170,7 +174,7 @@ export async function scrapeDSE(env: Env) {
                     updated_at = datetime("now") 
                   WHERE ticker = ?
                 `)
-                  .bind(annualEps, peRatio, nav, dps, roe, payoutRatio, low52, high52, stock.ticker)
+                  .bind(annualEps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, stock.ticker)
               );
             }
           }

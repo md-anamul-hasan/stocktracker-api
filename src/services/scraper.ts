@@ -52,11 +52,11 @@ export async function scrapeDSE(env: Env) {
 
     console.log(`Successfully parsed ${scrapedPrices.size} stock prices from DSE.`);
 
-    const activeStocks = await db.prepare("SELECT ticker FROM stocks WHERE status = 'active'").all<{ticker: string}>();
+    const allStocks = await db.prepare("SELECT ticker, status FROM stocks").all<{ticker: string, status: string}>();
     
     const stmts = [];
     
-    for (const stock of activeStocks.results) {
+    for (const stock of allStocks.results) {
       if (scrapedPrices.has(stock.ticker)) {
         const livePrice = scrapedPrices.get(stock.ticker)!;
         

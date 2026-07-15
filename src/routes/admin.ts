@@ -89,4 +89,27 @@ admin.delete('/holidays/:id', async (c) => {
   return c.json({ success: true });
 });
 
+// Settings CRUD
+admin.get('/settings', async (c) => {
+  const db = c.env.DB;
+  const result = await db.prepare('SELECT * FROM settings').all();
+  return c.json(result.results);
+});
+
+admin.post('/settings', async (c) => {
+  const body = await c.req.json();
+  const db = c.env.DB;
+  
+  const stmts = Object.keys(body).map(key => 
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime("now")')
+      .bind(key, String(body[key]))
+  );
+  
+  if (stmts.length > 0) {
+    await db.batch(stmts);
+  }
+  
+  return c.json({ success: true });
+});
+
 export default admin;

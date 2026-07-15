@@ -74,9 +74,18 @@ export async function scrapeDSE(env: Env) {
             const compHtml = await compResponse.text();
             
             let annualEps = 0;
-            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>\s*(?:<td[^>]*>[\d\.\-,]+<\/td>\s*){4}<td[^>]*>([\d\.\-,]+)<\/td>/is;
+            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>(.*?)<\/tr>/is;
             const epsMatch = epsRegex.exec(compHtml);
-            if (epsMatch && epsMatch[1]) annualEps = parseFloat(epsMatch[1].replace(/,/g, ''));
+            if (epsMatch && epsMatch[1]) {
+                const tds = epsMatch[1].match(/<td[^>]*>\s*(-?\d[\d\.,]*)\s*<\/td>/gi);
+                if (tds && tds.length > 0) {
+                    const lastTd = tds[tds.length - 1];
+                    const numMatch = lastTd.match(/(-?\d[\d\.,]*)/);
+                    if (numMatch) {
+                        annualEps = parseFloat(numMatch[1].replace(/,/g, ''));
+                    }
+                }
+            }
 
             let peRatio = 0;
             const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;

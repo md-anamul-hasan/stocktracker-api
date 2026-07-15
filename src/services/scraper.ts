@@ -53,10 +53,10 @@ export async function scrapeDSE(env: Env) {
             // Extract 52W Low/High
             let low52 = 0;
             let high52 = 0;
-            if (json.ah && json.ah.includes('-')) {
+            if (json.ah && typeof json.ah === 'string' && json.ah.includes('-')) {
               const parts = json.ah.split('-');
-              low52 = parseFloat(parts[0].trim());
-              high52 = parseFloat(parts[1].trim());
+              low52 = parseFloat(parts[0].replace(/,/g, '').trim());
+              high52 = parseFloat(parts[1].replace(/,/g, '').trim());
             }
 
             const eps = json.cb || 0;

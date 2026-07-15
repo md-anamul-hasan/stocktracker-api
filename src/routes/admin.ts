@@ -29,15 +29,15 @@ admin.post('/stocks', async (c) => {
       INSERT INTO stocks (
         ticker, company_name, sector, weight, target_pe, pe_ratio, eps,
         fifty_two_week_low, fifty_two_week_high, investment_thesis, 
-        status, status_reason, shariah_compliant
+        status, shariah_compliant
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
       body.pe_ratio || 0, body.eps, 
       body.fifty_two_week_low || 0, body.fifty_two_week_high || 0, 
       body.investment_thesis, body.status, 
-      body.status_reason || null, body.shariah_compliant ? 1 : 0
+      body.shariah_compliant ? 1 : 0
     );
 
     await stmt.run();
@@ -62,14 +62,14 @@ admin.put('/stocks/:id', async (c) => {
         ticker = ?, company_name = ?, sector = ?, weight = ?, target_pe = ?, 
         pe_ratio = ?, eps = ?, fifty_two_week_low = ?, fifty_two_week_high = ?,
         investment_thesis = ?, status = ?, 
-        status_reason = ?, shariah_compliant = ?, updated_at = datetime('now')
+        shariah_compliant = ?, updated_at = datetime('now')
       WHERE id = ?
     `).bind(
       body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
       body.pe_ratio || 0, body.eps, 
       body.fifty_two_week_low || 0, body.fifty_two_week_high || 0,
       body.investment_thesis, body.status, 
-      body.status_reason || null, body.shariah_compliant ? 1 : 0, id
+      body.shariah_compliant ? 1 : 0, id
     );
 
     await stmt.run();

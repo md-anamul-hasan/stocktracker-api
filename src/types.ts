@@ -21,7 +21,6 @@ export interface Stock {
   dividend_yield: number;
   investment_thesis: string;
   status: string;
-  status_reason: string;
   shariah_compliant: number;
   created_at: string;
   updated_at: string;

@@ -29,9 +29,9 @@ stocks.get('/screener', async (c) => {
   
   const result = await db.prepare(`
       SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.weight, s.estimated_yield, s.investment_thesis, s.status,
-             s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
-             s.bvps, s.dps, s.roe, s.payout_ratio, s.req_rate_of_return, s.growth_rate,
-             COALESCE(p.current_price, s.eps * s.target_pe) as current_price
+              s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
+              s.bvps, s.nocfps, s.dps, s.roe, s.payout_ratio, s.req_rate_of_return, s.risk_free_rate, s.growth_rate,
+              COALESCE(p.current_price, s.eps * s.target_pe) as current_price
       FROM stocks s
       LEFT JOIN price_data p ON s.ticker = p.ticker
       ORDER BY p.fetched_at DESC
@@ -45,19 +45,34 @@ stocks.get('/screener', async (c) => {
         const r = row.req_rate_of_return || 0.12;
         const g = row.growth_rate || 0;
         
-        // 1. Justified P/E
-        const target_price_pe = row.eps * row.target_pe;
-        
-        // 2. DDM (Dividend Discount Model)
-        // Price = D1 / (r - g)
+        // 1. Intrinsic Base (FCFE Proxy using NOCFPS)
+        // Value = FCFE * (1 + g) / (r - g)
         const ddm_denom = r - g;
-        const target_price_ddm = ddm_denom > 0 ? (row.dps / ddm_denom) : null;
+        let target_price_fcfe = null;
+        if (ddm_denom > 0 && row.nocfps) {
+            target_price_fcfe = (row.nocfps * (1 + g)) / ddm_denom;
+            if (target_price_fcfe < 0) target_price_fcfe = 0;
+        } else if (ddm_denom > 0 && row.dps) {
+            // Fallback to DDM if NOCFPS is missing/zero
+            target_price_fcfe = row.dps / ddm_denom; 
+        }
         
-        // 3. P/B Model
-        // Target Price = BVPS * (ROE / r)
-        const target_price_pb = r > 0 ? (row.bvps * (row.roe / r)) : null;
-        
-        // 4. Graham Number
+        // 2. Justified P/E
+        // Multiple = Payout Ratio / (r - g)
+        let target_price_justified_pe = null;
+        if (ddm_denom > 0 && row.payout_ratio > 0) {
+            const justified_pe = row.payout_ratio / ddm_denom;
+            target_price_justified_pe = row.eps * justified_pe;
+            if (target_price_justified_pe < 0) target_price_justified_pe = 0;
+        }
+
+        // Fallback backward compatibility for PE
+        const target_price_pe = row.eps * row.target_pe;
+        if (target_price_justified_pe === null) {
+            target_price_justified_pe = target_price_pe;
+        }
+
+        // 3. Graham Ceiling
         // SQRT(22.5 * EPS * BVPS)
         let target_price_graham = null;
         const graham_base = 22.5 * row.eps * row.bvps;
@@ -65,13 +80,29 @@ stocks.get('/screener', async (c) => {
           target_price_graham = Math.sqrt(graham_base);
         }
 
+        // 4. Hybrid Value Band
+        // Weighting: 50% FCFE (Intrinsic), 30% Justified P/E, 20% Graham
+        let target_price_hybrid = null;
+        let value_band_low = null;
+        let value_band_high = null;
+
+        if (target_price_fcfe !== null && target_price_justified_pe !== null && target_price_graham !== null) {
+             target_price_hybrid = (target_price_fcfe * 0.5) + (target_price_justified_pe * 0.3) + (target_price_graham * 0.2);
+             value_band_low = target_price_hybrid * 0.9;
+             // Hard non-negotiable price limit by Graham Ceiling
+             value_band_high = Math.min(target_price_hybrid * 1.1, target_price_graham);
+        }
+
         const enhancedRow = {
           ...row,
           target_price: target_price_pe, // fallback backward compatibility
           target_price_pe,
-          target_price_ddm,
-          target_price_pb,
-          target_price_graham
+          target_price_fcfe,
+          target_price_justified_pe,
+          target_price_graham,
+          target_price_hybrid,
+          value_band_low,
+          value_band_high
         };
 
         uniqueStocks.set(row.ticker, enhancedRow);

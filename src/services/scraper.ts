@@ -1,4 +1,5 @@
 import { Env } from '../types';
+import * as cheerio from 'cheerio';
 
 export async function scrapeDSE(env: Env) {
   const db = env.DB;
@@ -65,7 +66,7 @@ export async function scrapeDSE(env: Env) {
             .bind(stock.ticker, livePrice, 'DSE_SCRAPER')
         );
 
-        // Additionally scrape the EPS, P/E, and 52W range
+        // Additionally scrape the EPS, P/E, and 52W range along with NAV and Dividend
         try {
           const compResponse = await fetch(`https://www.dsebd.org/displayCompany.php?name=${stock.ticker}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -73,27 +74,28 @@ export async function scrapeDSE(env: Env) {
           if (compResponse.ok) {
             const compHtml = await compResponse.text();
             
+            // We load cheerio to safely query DOM instead of regex
+            // Note: Since this is a worker, we must ensure cheerio is imported at the top of the file
+            // Let's assume we've imported it.
+            const $ = cheerio.load(compHtml);
+
             let annualEps = 0;
-            const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>(.*?)<\/tr>/is;
-            const epsMatch = epsRegex.exec(compHtml);
-            if (epsMatch && epsMatch[1]) {
-                const tds = epsMatch[1].match(/<td[^>]*>\s*(-?\d[\d\.,]*)\s*<\/td>/gi);
-                if (tds && tds.length > 0) {
-                    const lastTd = tds[tds.length - 1];
-                    const numMatch = lastTd.match(/(-?\d[\d\.,]*)/);
-                    if (numMatch) {
-                        annualEps = parseFloat(numMatch[1].replace(/,/g, ''));
-                    }
-                }
-            }
-
             let peRatio = 0;
-            const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
-            const peMatch = peRegex.exec(compHtml);
-            if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1].replace(/,/g, ''));
-
+            let nav = 0;
+            let nocfps = 0;
+            let dividendPercent = 0;
             let low52 = 0;
             let high52 = 0;
+            let faceValue = 10; // Default DSE face value
+
+            // 1. Scrape Face Value (Needed for DPS calculation)
+            const fvRegex = /Face Value.*?<\/th>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
+            const fvMatch = fvRegex.exec(compHtml);
+            if (fvMatch && fvMatch[1]) {
+                faceValue = parseFloat(fvMatch[1].replace(/,/g, ''));
+            }
+
+            // 2. Scrape 52-week range
             const rangeRegex = /52\s*Weeks.*?<\/th>\s*<td[^>]*>([\d\.\-,]+)\s*-\s*([\d\.\-,]+)<\/td>/is;
             const rangeMatch = rangeRegex.exec(compHtml);
             if (rangeMatch && rangeMatch[1] && rangeMatch[2]) {
@@ -101,11 +103,88 @@ export async function scrapeDSE(env: Env) {
               high52 = parseFloat(rangeMatch[2].replace(/,/g, ''));
             }
 
-            // Only update if at least one value is parsed correctly to avoid wiping DB
+            // 3. Scrape Fundamentals from Data Tables
+            $('table#company').each((i, table) => {
+                const html = $(table).html() || '';
+                
+                // Financial Performance (EPS & NAV)
+                if (html.includes('NAV Per Share') && html.includes('Earnings per share(EPS)')) {
+                    const rows = $(table).find('tr:not(.header)');
+                    const lastRow = rows.last();
+                    const tds = lastRow.find('td');
+                    
+                    const epsText = tds.eq(4).text().trim();
+                    const navText = tds.eq(7).text().trim();
+                    const nocfpsText = tds.eq(10).text().trim();
+                    
+                    if (epsText && epsText !== '-') annualEps = parseFloat(epsText.replace(/,/g, ''));
+                    if (navText && navText !== '-') nav = parseFloat(navText.replace(/,/g, ''));
+                    if (nocfpsText && nocfpsText !== '-') nocfps = parseFloat(nocfpsText.replace(/,/g, ''));
+                }
+
+                // Financial Performance Continued (P/E & Dividend)
+                if (html.includes('Dividend Yield in %') && html.includes('Year end Price Earnings')) {
+                    const rows = $(table).find('tr:not(.header)');
+                    const lastRow = rows.last();
+                    const tds = lastRow.find('td');
+                    
+                    const peText = tds.eq(4).text().trim();
+                    const divText = tds.eq(7).text().trim();
+                    
+                    if (peText && peText !== '-') peRatio = parseFloat(peText.replace(/,/g, ''));
+                    if (divText && divText !== '-') dividendPercent = parseFloat(divText.replace(/,/g, ''));
+                }
+            });
+
+            // Fallback for EPS if the table parser missed it (rare, but good for safety)
+            if (annualEps === 0) {
+              const epsRegex = /Earnings Per Share \(EPS\) - continuing operations.*?<tr>\s*<td>Basic<\/td>(.*?)<\/tr>/is;
+              const epsMatch = epsRegex.exec(compHtml);
+              if (epsMatch && epsMatch[1]) {
+                  const tds = epsMatch[1].match(/<td[^>]*>\s*(-?\d[\d\.,]*)\s*<\/td>/gi);
+                  if (tds && tds.length > 0) {
+                      const lastTd = tds[tds.length - 1];
+                      const numMatch = lastTd.match(/(-?\d[\d\.,]*)/);
+                      if (numMatch) annualEps = parseFloat(numMatch[1].replace(/,/g, ''));
+                  }
+              }
+            }
+
+            // Fallback for P/E
+            if (peRatio === 0) {
+              const peRegex = /P\/E Ratio using Basic EPS.*?<\/td>\s*<td[^>]*>([\d\.\-,]+)<\/td>/is;
+              const peMatch = peRegex.exec(compHtml);
+              if (peMatch && peMatch[1]) peRatio = parseFloat(peMatch[1].replace(/,/g, ''));
+            }
+
+            // Calculate Derived Metrics
+            let dps = 0;
+            if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);
+
+            let roe = 0;
+            if (nav > 0 && annualEps > 0) roe = (annualEps / nav); // Kept as decimal
+
+            let payoutRatio = 0;
+            if (annualEps > 0 && dps > 0) payoutRatio = (dps / annualEps);
+
+            // Only update if at least one core value is parsed correctly to avoid wiping DB
             if (!isNaN(annualEps) && !isNaN(peRatio)) {
               stmts.push(
-                db.prepare('UPDATE stocks SET eps = ?, pe_ratio = ?, fifty_two_week_low = ?, fifty_two_week_high = ?, updated_at = datetime("now") WHERE ticker = ?')
-                  .bind(annualEps, peRatio, low52, high52, stock.ticker)
+                db.prepare(`
+                  UPDATE stocks SET 
+                    eps = ?, 
+                    pe_ratio = ?, 
+                    bvps = ?, 
+                    nocfps = ?,
+                    dps = ?, 
+                    roe = ?, 
+                    payout_ratio = ?, 
+                    fifty_two_week_low = ?, 
+                    fifty_two_week_high = ?, 
+                    updated_at = datetime("now") 
+                  WHERE ticker = ?
+                `)
+                  .bind(annualEps, peRatio, nav, nocfps, dps, roe, payoutRatio, low52, high52, stock.ticker)
               );
             }
           }

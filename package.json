@@ -11,6 +11,7 @@
     "db:reset": "npm run db:init && npm run db:seed"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "hono": "^4.6.0"
   },
   "devDependencies": {

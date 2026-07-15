@@ -9,7 +9,7 @@ export const corsMiddleware = async (c: Context, next: Next) => {
   c.res.headers.set('Access-Control-Max-Age', '86400');
 
   if (c.req.method === 'OPTIONS') {
-    return c.text('', 204);
+    return c.body(null, 204);
   }
 
   await next();

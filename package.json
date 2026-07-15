@@ -11,8 +11,10 @@
     "db:reset": "npm run db:init && npm run db:seed"
   },
   "dependencies": {
+    "bcrypt-ts": "^9.0.1",
     "cheerio": "^1.2.0",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "p-limit": "^7.3.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",

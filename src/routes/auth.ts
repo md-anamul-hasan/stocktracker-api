@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sign } from 'hono/jwt';
 import { Env, AdminUser } from '../types';
-import { hashPassword } from '../services/crypto';
+import { hashPassword, comparePassword } from '../services/crypto';
 import { authMiddleware } from '../middleware/auth';
 
 const auth = new Hono<{ Bindings: Env }>();
@@ -14,13 +14,12 @@ auth.post('/login', async (c) => {
   }
 
   const db = c.env.DB;
-  const password_hash = await hashPassword(password);
+  
+  const user = await db.prepare('SELECT id, email, name, password_hash FROM admin_users WHERE email = ?')
+    .bind(email)
+    .first<AdminUser & { password_hash: string }>();
 
-  const user = await db.prepare('SELECT id, email, name FROM admin_users WHERE email = ? AND password_hash = ?')
-    .bind(email, password_hash)
-    .first<AdminUser>();
-
-  if (!user) {
+  if (!user || !(await comparePassword(password, user.password_hash))) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 

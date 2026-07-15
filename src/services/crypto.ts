@@ -1,8 +1,9 @@
+import { hash, compare } from 'bcrypt-ts';
+
 export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
+  return await hash(password, 10);
+}
+
+export async function comparePassword(password: string, hashStr: string): Promise<boolean> {
+  return await compare(password, hashStr);
 }

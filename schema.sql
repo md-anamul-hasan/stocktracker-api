@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS price_data (
   low REAL DEFAULT 0,
   fetched_at TEXT DEFAULT (datetime('now')),
   source TEXT DEFAULT 'DSE',
-  FOREIGN KEY (ticker) REFERENCES stocks(ticker)
+  FOREIGN KEY (ticker) REFERENCES stocks(ticker) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- Admin users for CMS authentication
@@ -64,7 +64,6 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker);
 CREATE INDEX IF NOT EXISTS idx_stocks_status ON stocks(status);
 CREATE INDEX IF NOT EXISTS idx_price_data_ticker ON price_data(ticker);
 CREATE INDEX IF NOT EXISTS idx_price_data_fetched_at ON price_data(fetched_at);

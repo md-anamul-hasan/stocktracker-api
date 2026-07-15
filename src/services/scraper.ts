@@ -1,5 +1,6 @@
 import { Env } from '../types';
 import * as cheerio from 'cheerio';
+import pLimit from 'p-limit';
 
 export async function scrapeDSE(env: Env) {
   const db = env.DB;
@@ -53,11 +54,12 @@ export async function scrapeDSE(env: Env) {
 
     console.log(`Successfully parsed ${scrapedPrices.size} stock prices from DSE.`);
 
-    const allStocks = await db.prepare("SELECT ticker, status FROM stocks").all<{ticker: string, status: string}>();
+    const allStocks = await db.prepare("SELECT ticker, status FROM stocks WHERE status = 'active'").all<{ticker: string, status: string}>();
     
-    const stmts = [];
+    const stmts: any[] = [];
+    const limit = pLimit(5); // Process up to 5 stocks concurrently
     
-    for (const stock of allStocks.results) {
+    const scrapeTasks = allStocks.results.map(stock => limit(async () => {
       if (scrapedPrices.has(stock.ticker)) {
         const livePrice = scrapedPrices.get(stock.ticker)!;
         
@@ -152,13 +154,14 @@ export async function scrapeDSE(env: Env) {
             if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);
 
             let roe = 0;
-            if (nav > 0 && annualEps > 0) roe = (annualEps / nav); // Kept as decimal
+            if (nav !== 0 && annualEps !== 0) roe = (annualEps / nav); // Kept as decimal
 
             let payoutRatio = 0;
             if (annualEps > 0 && dps > 0) payoutRatio = (dps / annualEps);
 
             // Only update if at least one core value is parsed correctly to avoid wiping DB
-            if (!isNaN(annualEps) && !isNaN(peRatio)) {
+            // (If EPS is perfectly 0, it likely failed to parse)
+            if (annualEps !== 0 && !isNaN(annualEps) && !isNaN(peRatio)) {
               stmts.push(
                 db.prepare(`
                   UPDATE stocks SET 
@@ -182,7 +185,9 @@ export async function scrapeDSE(env: Env) {
           console.error(`Failed to fetch fundamental data for ${stock.ticker}`, e);
         }
       }
-    }
+    }));
+
+    await Promise.all(scrapeTasks);
 
     if (stmts.length > 0) {
       await db.batch(stmts);

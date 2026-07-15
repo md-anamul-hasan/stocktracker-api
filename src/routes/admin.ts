@@ -7,59 +7,79 @@ const admin = new Hono<{ Bindings: Env }>();
 admin.use('*', authMiddleware);
 
 admin.get('/stocks', async (c) => {
-  const db = c.env.DB;
-  const result = await db.prepare('SELECT * FROM stocks ORDER BY weight DESC').all<Stock>();
-  return c.json(result.results);
+  try {
+    const db = c.env.DB;
+    const result = await db.prepare('SELECT * FROM stocks ORDER BY weight DESC').all<Stock>();
+    return c.json(result.results);
+  } catch (error) {
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
 });
 
 admin.post('/stocks', async (c) => {
-  const body = await c.req.json();
-  const db = c.env.DB;
-  
-  const stmt = db.prepare(`
-    INSERT INTO stocks (
-      ticker, company_name, sector, weight, target_pe, pe_ratio, eps,
-      bvps, nocfps, dps, roe, payout_ratio, req_rate_of_return, risk_free_rate, growth_rate, 
-      fifty_two_week_low, fifty_two_week_high, estimated_yield, investment_thesis, 
-      status, status_reason, shariah_compliant
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
-    body.pe_ratio || 0, body.eps, 
-    body.bvps || 0, body.nocfps || 0, body.dps || 0, body.roe || 0, body.payout_ratio || 0, body.req_rate_of_return ?? 0.12, body.risk_free_rate ?? 0.10, body.growth_rate || 0,
-    body.fifty_two_week_low || 0, body.fifty_two_week_high || 0, 
-    body.estimated_yield, body.investment_thesis, body.status, 
-    body.status_reason || null, body.shariah_compliant ? 1 : 0
-  );
+  try {
+    const body = await c.req.json();
+    const db = c.env.DB;
+    
+    if (!body.ticker || !body.company_name || !body.sector || body.weight === undefined || body.target_pe === undefined || body.eps === undefined) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+    
+    const stmt = db.prepare(`
+      INSERT INTO stocks (
+        ticker, company_name, sector, weight, target_pe, pe_ratio, eps,
+        bvps, nocfps, dps, roe, payout_ratio, req_rate_of_return, risk_free_rate, growth_rate, 
+        fifty_two_week_low, fifty_two_week_high, estimated_yield, investment_thesis, 
+        status, status_reason, shariah_compliant
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
+      body.pe_ratio || 0, body.eps, 
+      body.bvps || 0, body.nocfps || 0, body.dps || 0, body.roe || 0, body.payout_ratio || 0, body.req_rate_of_return ?? 0.12, body.risk_free_rate ?? 0.10, body.growth_rate || 0,
+      body.fifty_two_week_low || 0, body.fifty_two_week_high || 0, 
+      body.estimated_yield, body.investment_thesis, body.status, 
+      body.status_reason || null, body.shariah_compliant ? 1 : 0
+    );
 
-  await stmt.run();
-  return c.json({ success: true }, 201);
+    await stmt.run();
+    return c.json({ success: true }, 201);
+  } catch (error) {
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
 });
 
 admin.put('/stocks/:id', async (c) => {
-  const id = c.req.param('id');
-  const body = await c.req.json();
-  const db = c.env.DB;
-  
-  const stmt = db.prepare(`
-    UPDATE stocks SET 
-      ticker = ?, company_name = ?, sector = ?, weight = ?, target_pe = ?, 
-      pe_ratio = ?, eps = ?, bvps = ?, nocfps = ?, dps = ?, roe = ?, payout_ratio = ?, 
-      req_rate_of_return = ?, risk_free_rate = ?, growth_rate = ?, fifty_two_week_low = ?, fifty_two_week_high = ?,
-      estimated_yield = ?, investment_thesis = ?, status = ?, 
-      status_reason = ?, shariah_compliant = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(
-    body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
-    body.pe_ratio || 0, body.eps, body.bvps || 0, body.nocfps || 0, body.dps || 0, body.roe || 0, body.payout_ratio || 0, body.req_rate_of_return ?? 0.12, body.risk_free_rate ?? 0.10, body.growth_rate || 0,
-    body.fifty_two_week_low || 0, body.fifty_two_week_high || 0,
-    body.estimated_yield, body.investment_thesis, body.status, 
-    body.status_reason || null, body.shariah_compliant ? 1 : 0, id
-  );
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const db = c.env.DB;
+    
+    if (!body.ticker || !body.company_name || !body.sector || body.weight === undefined || body.target_pe === undefined || body.eps === undefined) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+    
+    const stmt = db.prepare(`
+      UPDATE stocks SET 
+        ticker = ?, company_name = ?, sector = ?, weight = ?, target_pe = ?, 
+        pe_ratio = ?, eps = ?, bvps = ?, nocfps = ?, dps = ?, roe = ?, payout_ratio = ?, 
+        req_rate_of_return = ?, risk_free_rate = ?, growth_rate = ?, fifty_two_week_low = ?, fifty_two_week_high = ?,
+        estimated_yield = ?, investment_thesis = ?, status = ?, 
+        status_reason = ?, shariah_compliant = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(
+      body.ticker, body.company_name, body.sector, body.weight, body.target_pe, 
+      body.pe_ratio || 0, body.eps, body.bvps || 0, body.nocfps || 0, body.dps || 0, body.roe || 0, body.payout_ratio || 0, body.req_rate_of_return ?? 0.12, body.risk_free_rate ?? 0.10, body.growth_rate || 0,
+      body.fifty_two_week_low || 0, body.fifty_two_week_high || 0,
+      body.estimated_yield, body.investment_thesis, body.status, 
+      body.status_reason || null, body.shariah_compliant ? 1 : 0, id
+    );
 
-  await stmt.run();
-  return c.json({ success: true });
+    await stmt.run();
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
 });
 
 admin.delete('/stocks/:id', async (c) => {

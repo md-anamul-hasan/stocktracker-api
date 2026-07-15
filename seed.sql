@@ -33,7 +33,6 @@ INSERT INTO price_data (ticker, current_price, source) VALUES
 ('OLYMPIC', 146.00, 'SEED');
 
 -- Admin User
--- Password is 'admin123' (we'll assume a basic SHA-256 hash or similar for now, but a real app would use bcrypt/scrypt.
--- For demo purposes with Web Crypto, this is the SHA-256 of 'admin123')
+-- Password is 'admin123' hashed with bcrypt
 INSERT INTO admin_users (email, name, password_hash)
-VALUES ('admin@stocktracker.bd', 'System Admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9');
+VALUES ('admin@stocktracker.bd', 'System Admin', '$2b$10$YcApAyqttPW9sNTR3mrmEuu6Xns72IBa47SWrLqZpDTvSD0HjTs6i');

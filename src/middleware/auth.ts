@@ -10,7 +10,6 @@ export const authMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) 
 
   const token = authHeader.split(' ')[1];
   let payload;
-  console.log('JWT_SECRET IS:', c.env.JWT_SECRET);
   try {
     payload = await verify(token, c.env.JWT_SECRET, 'HS256');
   } catch (error) {

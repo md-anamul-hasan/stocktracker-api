@@ -245,13 +245,32 @@ admin.post('/sync/fundamentals', async (c) => {
 
 admin.post('/trigger-scrape', async (c) => {
   try {
-    // Run the scraper asynchronously without blocking the response
-    c.executionCtx.waitUntil(scrapeDSE(c.env));
-    return c.json({ success: true, message: 'Scraper triggered successfully' });
+    // Run the scraper asynchronously without    // Continue in background
+    c.env.DB.prepare('SELECT 1').first().then(() => scrapeDSE(c.env));
+    return c.json({ success: true, message: 'Scraper triggered successfully in the background' });
   } catch (error: any) {
-    console.error('Failed to trigger scraper:', error);
-    return c.json({ error: 'Failed to trigger scraper', details: error.message }, 500);
+    console.error('Manual scrape trigger failed:', error);
+    return c.json({ error: error.message }, 500);
   }
+});
+
+admin.get('/test-lb', async (c) => {
+  const homeRes = await fetch('https://lankabd.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const homeHtml = await homeRes.text();
+  const tokenMatch = homeHtml.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/);
+  const token = tokenMatch ? tokenMatch[1] : '';
+  const cookies = homeRes.headers.get('set-cookie') || '';
+  const apiHeaders = { 'User-Agent': 'Mozilla/5.0', 'RequestVerificationToken': token, 'Cookie': cookies, 'Accept': 'application/json' };
+  
+  let results: any = {};
+  
+  const res1 = await fetch(`https://lankabd.com/api/Company/GetCompanySearch?searchString=SQURPHARMA`, { headers: apiHeaders });
+  results.search = await res1.text();
+
+  const res2 = await fetch(`https://lankabd.com/api/APIDropDown/GetAllSymbol`, { headers: apiHeaders });
+  results.allSymbols = await res2.text();
+
+  return c.json(results);
 });
 
 export default admin;

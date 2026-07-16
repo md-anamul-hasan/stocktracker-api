@@ -86,99 +86,107 @@ stocks.get('/screener', async (c) => {
 stocks.get('/valuation/:ticker', async (c) => {
   try {
     const ticker = c.req.param('ticker').toUpperCase();
-    
-
-
     const db = c.env.DB;
-    // Check for DB overrides and get company ID
-    const dbStock = await db.prepare("SELECT beta, risk_free_rate, lankabd_company_id FROM stocks WHERE ticker = ?").bind(ticker).first<any>();
-
-    // We need the company ID to query LankaBangla. If not found in DB, return error.
-    if (!dbStock || !dbStock.lankabd_company_id) {
-       return c.json({ detail: 'Company ID not found in database. Add stock first.' }, 404);
-    }
-
-    const cid = dbStock.lankabd_company_id;
-
-    // Fetch CSRF Token
-    const homeRes = await fetch('https://lankabd.com/', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    const homeHtml = await homeRes.text();
-    const tokenMatch = homeHtml.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/);
-    if (!tokenMatch) {
-        return c.json({ detail: 'Failed to extract CSRF token from LankaBangla' }, 502);
-    }
-    const token = tokenMatch[1];
-    const cookies = homeRes.headers.get('set-cookie') || '';
     
-    const apiHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'RequestVerificationToken': token,
-        'Cookie': cookies,
-        'Accept': 'application/json'
-    };
+    // Fetch stock data and latest price from DB
+    const result = await db.prepare(`
+      SELECT s.*, 
+             COALESCE(p.current_price, s.eps * s.target_pe) as current_price
+      FROM stocks s
+      LEFT JOIN (
+        SELECT ticker, current_price
+        FROM (
+          SELECT ticker, current_price, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY fetched_at DESC, id DESC) as rn
+          FROM price_data
+        ) WHERE rn = 1
+      ) p ON s.ticker = p.ticker
+      WHERE s.ticker = ?
+    `).bind(ticker).first<any>();
 
-    const [
-      mkDataRes, 
-      interimFinRes,
-      divHistRes,
-      finRatiosRes,
-      techIndRes
-    ] = await Promise.all([
-      fetch(`https://lankabd.com/api/Company/LatestMkDataSymbol?cid=${cid}`, { headers: apiHeaders }),
-      fetch(`https://lankabd.com/api/company/StatsInterimFinReport?cid=${cid}`, { headers: apiHeaders }),
-      fetch(`https://lankabd.com/api/company/StatsDividendHistory?cid=${cid}`, { headers: apiHeaders }),
-      fetch(`https://lankabd.com/api/company/FinancialRatiosV2?cid=${cid}`, { headers: apiHeaders }),
-      fetch(`https://lankabd.com/api/company/TechnicalIndicators?cid=${cid}`, { headers: apiHeaders })
-    ]);
+    let currentPrice = 0, eps = 0, payoutRatio = 0, g = 0, r = 0, justifiedPe = 0, beta = 1.0, riskFreeRate = 0.105;
 
-    if (!mkDataRes.ok) {
-      return c.json({ detail: 'Failed to fetch market data from LankaBangla' }, 502);
-    }
+    if (result) {
+        currentPrice = result.current_price || 0;
+        eps = result.eps || 0;
+        payoutRatio = result.payout_ratio || 0;
+        g = result.growth_rate || 0;
+        r = result.req_rate_of_return || 0;
+        justifiedPe = result.justified_pe || 0;
+        beta = result.beta || 1;
+        riskFreeRate = result.risk_free_rate || 0.105;
+    } else {
+        // Fallback: Fetch from LankaBangla on the fly for stocks not in DB
+        const homeRes = await fetch('https://lankabd.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const homeHtml = await homeRes.text();
+        const tokenMatch = homeHtml.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/);
+        const token = tokenMatch ? tokenMatch[1] : '';
+        const cookies = homeRes.headers.get('set-cookie') || '';
+        const apiHeaders = { 'User-Agent': 'Mozilla/5.0', 'RequestVerificationToken': token, 'Cookie': cookies, 'Accept': 'application/json' };
+        
+        // Find company ID
+        let cid = null;
+        for(let sectorId = 1; sectorId <= 30; sectorId++) {
+            try {
+                const res = await fetch(`https://lankabd.com/api/APIDropDown/GetAllSymbolBySector?cid=${sectorId}`, { headers: apiHeaders });
+                if(res.ok){
+                    const data = await res.json() as any[];
+                    const found = data.find((s:any) => s.symbol === ticker);
+                    if (found && found.companyID) {
+                        cid = found.companyID;
+                        break;
+                    }
+                }
+            } catch(e) {}
+        }
 
-    const mkData = await mkDataRes.json() as any;
-    const currentPrice = mkData.lastTradedPrice || mkData.mkistaT_OPEN_PRICE || 0;
-    
-    if (currentPrice === 0) {
-      return c.json({ detail: 'Invalid ticker or no price data found' }, 404);
-    }
+        if (!cid) {
+             return c.json({ detail: 'Stock not found in database and could not be found on LankaBangla.' }, 404);
+        }
 
-    const interimFin = await interimFinRes.json().catch(() => []) as any[];
-    const divHist = await divHistRes.json().catch(() => []) as any[];
-    const finRatios = await finRatiosRes.json().catch(() => []) as any[];
-    const techInd = await techIndRes.json().catch(() => ({})) as any;
+        // Fetch market data and fundamentals
+        const [ mkDataRes, interimFinRes, divHistRes, finRatiosRes, techIndRes ] = await Promise.all([
+          fetch(`https://lankabd.com/api/Company/LatestMkDataSymbol?cid=${cid}`, { headers: apiHeaders }),
+          fetch(`https://lankabd.com/api/company/StatsInterimFinReport?cid=${cid}`, { headers: apiHeaders }),
+          fetch(`https://lankabd.com/api/company/StatsDividendHistory?cid=${cid}`, { headers: apiHeaders }),
+          fetch(`https://lankabd.com/api/company/FinancialRatiosV2?cid=${cid}`, { headers: apiHeaders }),
+          fetch(`https://lankabd.com/api/company/TechnicalIndicators?cid=${cid}`, { headers: apiHeaders })
+        ]);
 
-    let eps = 0;
-    let nav = 0;
-    if (interimFin && interimFin.length > 0) {
-        if (divHist && divHist.length > 0) {
+        const mkData = await mkDataRes.json().catch(()=>({})) as any;
+        const interimFin = await interimFinRes.json().catch(()=>[]) as any[];
+        const divHist = await divHistRes.json().catch(()=>[]) as any[];
+        const finRatios = await finRatiosRes.json().catch(()=>[]) as any[];
+        const techInd = await techIndRes.json().catch(()=>({})) as any;
+
+        currentPrice = mkData.lastTradedPrice || mkData.mkistaT_OPEN_PRICE || 0;
+        
+        let nav = 0;
+        if (interimFin && interimFin.length > 0 && divHist && divHist.length > 0) {
+            eps = divHist[0].eps || 0;
+            nav = divHist[0].nav || 0;
+        } else if (divHist && divHist.length > 0) {
             eps = divHist[0].eps || 0;
             nav = divHist[0].nav || 0;
         }
-    } else if (divHist && divHist.length > 0) {
-        eps = divHist[0].eps || 0;
-        nav = divHist[0].nav || 0;
+
+        const divYieldRatio = Array.isArray(finRatios) ? finRatios.find((rat: any) => rat.ratioList?.some((l: any) => l.Name === "Dividend Yield "))?.ratioList.find((l:any) => l.Name === "Dividend Yield ") : null;
+        const dividendYield = divYieldRatio ? divYieldRatio.Result * 100 : (divHist && divHist.length > 0 ? (divHist[0].cashDividend || 0) : 0);
+        const dps = (dividendYield / 100) * currentPrice;
+        
+        const roe = eps > 0 && nav > 0 ? (eps/nav) : 0;
+        payoutRatio = eps > 0 ? (dps / eps) : 0;
+        
+        beta = techInd.beta_Daily || 1.0; 
+        riskFreeRate = 0.105;
+        r = riskFreeRate + (beta * 0.06); 
+        g = roe * (1 - payoutRatio);
     }
 
-    const divYieldRatio = Array.isArray(finRatios) ? finRatios.find((r: any) => r.ratioList?.some((l: any) => l.Name === "Dividend Yield "))?.ratioList.find((l:any) => l.Name === "Dividend Yield ") : null;
-    const dividendYield = divYieldRatio ? divYieldRatio.Result * 100 : (divHist && divHist.length > 0 ? (divHist[0].cashDividend || 0) : 0);
-    const dps = (dividendYield / 100) * currentPrice;
-    
-    const roe = eps > 0 && nav > 0 ? (eps/nav) : 0;
-    const payoutRatio = eps > 0 ? (dps / eps) : 0;
-    
-    const beta = dbStock?.beta && dbStock.beta !== 1.0 ? dbStock.beta : (techInd.beta_Daily || 1.0); 
-    const riskFreeRate = dbStock?.risk_free_rate !== null && dbStock?.risk_free_rate !== undefined ? dbStock.risk_free_rate : 0.105;
-    const r = riskFreeRate + (beta * 0.06); // Rf + ERP (6%)
-    const g = roe * (1 - payoutRatio);
-    
-    let justifiedPe = 0;
-    if (r > g && eps > 0 && payoutRatio >= 0 && payoutRatio <= 1) {
-      justifiedPe = payoutRatio / (r - g);
-    } else if (payoutRatio > 1 && r > g) {
-      // Sometimes companies pay out more than earnings, cap it at 1 for Gordon Growth
-      justifiedPe = 1.0 / (r - g);
+    // Recalculate if fields are missing but derivable
+    if (!justifiedPe && r > g && eps > 0 && payoutRatio >= 0 && payoutRatio <= 1) {
+        justifiedPe = payoutRatio / (r - g);
+    } else if (!justifiedPe && payoutRatio > 1 && r > g) {
+        justifiedPe = 1.0 / (r - g);
     }
 
     const targetPrice = justifiedPe * eps;

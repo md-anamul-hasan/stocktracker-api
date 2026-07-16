@@ -30,9 +30,10 @@ admin.post('/stocks', async (c) => {
       INSERT INTO stocks (
         ticker, company_name, sector, weight, target_pe, pe_ratio, eps,
         fifty_two_week_low, fifty_two_week_high, investment_thesis, 
-        status, shariah_compliant, beta, justified_pe, risk_free_rate
+        status, shariah_compliant, beta, justified_pe, risk_free_rate,
+        total_liabilities, total_equity, current_assets, current_liabilities, net_income, free_cash_flow
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       body.ticker, body.company_name || 'Pending Data', body.sector || 'Pending', body.weight, body.target_pe, 
       body.pe_ratio || 0, body.eps || 0, 
@@ -41,7 +42,13 @@ admin.post('/stocks', async (c) => {
       body.shariah_compliant ? 1 : 0,
       body.beta !== undefined ? body.beta : 1.0,
       body.justified_pe || 0,
-      body.risk_free_rate !== undefined ? body.risk_free_rate : null
+      body.risk_free_rate !== undefined ? body.risk_free_rate : null,
+      body.total_liabilities || 0,
+      body.total_equity || 0,
+      body.current_assets || 0,
+      body.current_liabilities || 0,
+      body.net_income || 0,
+      body.free_cash_flow || 0
     );
 
     await stmt.run();
@@ -70,7 +77,11 @@ admin.put('/stocks/:id', async (c) => {
         ticker = ?, company_name = ?, sector = ?, weight = ?, target_pe = ?, 
         pe_ratio = ?, eps = ?, fifty_two_week_low = ?, fifty_two_week_high = ?,
         investment_thesis = ?, status = ?, 
-        shariah_compliant = ?, beta = COALESCE(?, beta), risk_free_rate = COALESCE(?, risk_free_rate), justified_pe = COALESCE(?, justified_pe), updated_at = datetime('now')
+        shariah_compliant = ?, beta = COALESCE(?, beta), risk_free_rate = COALESCE(?, risk_free_rate), justified_pe = COALESCE(?, justified_pe),
+        total_liabilities = COALESCE(?, total_liabilities), total_equity = COALESCE(?, total_equity), 
+        current_assets = COALESCE(?, current_assets), current_liabilities = COALESCE(?, current_liabilities),
+        net_income = COALESCE(?, net_income), free_cash_flow = COALESCE(?, free_cash_flow),
+        updated_at = datetime('now')
       WHERE id = ?
     `).bind(
       body.ticker, body.company_name || 'Pending Data', body.sector || 'Pending', body.weight, body.target_pe, 
@@ -81,6 +92,12 @@ admin.put('/stocks/:id', async (c) => {
       body.beta !== undefined ? body.beta : null,
       body.risk_free_rate !== undefined ? body.risk_free_rate : null,
       body.justified_pe !== undefined ? body.justified_pe : null,
+      body.total_liabilities !== undefined ? body.total_liabilities : null,
+      body.total_equity !== undefined ? body.total_equity : null,
+      body.current_assets !== undefined ? body.current_assets : null,
+      body.current_liabilities !== undefined ? body.current_liabilities : null,
+      body.net_income !== undefined ? body.net_income : null,
+      body.free_cash_flow !== undefined ? body.free_cash_flow : null,
       id
     );
 

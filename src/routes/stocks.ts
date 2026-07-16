@@ -37,6 +37,8 @@ stocks.get('/screener', async (c) => {
         SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.justified_pe, s.beta, s.weight, s.investment_thesis, s.status,
                 s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
                 s.auth_cap, s.listed_year, s.category, s.dividend_yield,
+                s.growth_rate, s.total_liabilities, s.total_equity, s.current_assets, s.current_liabilities, s.net_income, s.free_cash_flow,
+                s.roe, s.payout_ratio,
                 COALESCE(p.current_price, s.eps * s.target_pe) as current_price
         FROM stocks s
         LEFT JOIN (
@@ -50,11 +52,24 @@ stocks.get('/screener', async (c) => {
 
       const enhancedStocks = result.results.map(row => {
           const target_price_pe = row.eps * row.target_pe;
+          
+          const debt_to_equity = row.total_equity > 0 ? (row.total_liabilities / row.total_equity) : 0;
+          const current_ratio = row.current_liabilities > 0 ? (row.current_assets / row.current_liabilities) : 0;
+          
+          const peg_ratio = (row.growth_rate > 0 && row.pe_ratio > 0) ? (row.pe_ratio / (row.growth_rate * 100)) : 0;
+          const pegy_ratio = ((row.growth_rate + row.dividend_yield/100) > 0 && row.pe_ratio > 0) ? (row.pe_ratio / ((row.growth_rate + row.dividend_yield/100) * 100)) : 0;
+          
+          const manual_roe = row.total_equity > 0 ? (row.net_income / row.total_equity) : row.roe;
 
           return {
             ...row,
             target_price: target_price_pe,
-            target_price_pe
+            target_price_pe,
+            debt_to_equity,
+            current_ratio,
+            peg_ratio,
+            pegy_ratio,
+            computed_roe: manual_roe
           };
       });
 

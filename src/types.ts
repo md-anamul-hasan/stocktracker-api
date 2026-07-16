@@ -23,6 +23,12 @@ export interface Stock {
   fifty_two_week_high: number;
   auth_cap: number;
   listed_year: number;
+  total_liabilities: number;
+  total_equity: number;
+  current_assets: number;
+  current_liabilities: number;
+  net_income: number;
+  free_cash_flow: number;
   category: string;
   dividend_yield: number;
   investment_thesis: string;

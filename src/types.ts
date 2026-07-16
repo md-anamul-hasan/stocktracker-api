@@ -22,6 +22,19 @@ export interface Stock {
   fifty_two_week_low: number;
   fifty_two_week_high: number;
   auth_cap: number;
+  paid_up_cap: number;
+  market_cap: number;
+  credit_rating: string;
+  rsi: number;
+  macd: number;
+  nav: number;
+  current_ratio: number;
+  quick_ratio: number;
+  debt_to_equity: number;
+  roa: number;
+  asset_turnover: number;
+  inventory_turnover: number;
+  cash_conversion_cycle: number;
   listed_year: number;
   total_liabilities: number;
   total_equity: number;
@@ -34,6 +47,7 @@ export interface Stock {
   investment_thesis: string;
   status: string;
   shariah_compliant: number;
+  lankabd_company_id: number | null;
   created_at: string;
   updated_at: string;
   // joined fields

@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS stocks (
   fifty_two_week_high REAL DEFAULT 0,
   estimated_yield REAL DEFAULT 0,
   auth_cap REAL DEFAULT 0,
+  paid_up_cap REAL DEFAULT 0,
+  market_cap REAL DEFAULT 0,
+  credit_rating TEXT,
+  rsi REAL DEFAULT 0,
+  macd REAL DEFAULT 0,
+  nav REAL DEFAULT 0,
+  current_ratio REAL DEFAULT 0,
+  quick_ratio REAL DEFAULT 0,
+  debt_to_equity REAL DEFAULT 0,
+  roa REAL DEFAULT 0,
+  asset_turnover REAL DEFAULT 0,
+  inventory_turnover REAL DEFAULT 0,
+  cash_conversion_cycle REAL DEFAULT 0,
   listed_year INTEGER,
   category TEXT,
   dividend_yield REAL DEFAULT 0,
@@ -40,6 +53,7 @@ CREATE TABLE IF NOT EXISTS stocks (
   status TEXT NOT NULL DEFAULT 'active',
   status_reason TEXT,
   shariah_compliant INTEGER NOT NULL DEFAULT 1,
+  lankabd_company_id INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -88,3 +102,20 @@ CREATE TABLE IF NOT EXISTS holidays (
   description TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Shareholding Patterns
+CREATE TABLE IF NOT EXISTS shareholding_patterns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  month_year TEXT NOT NULL,
+  sponsor_director REAL DEFAULT 0,
+  govt REAL DEFAULT 0,
+  foreign_stake REAL DEFAULT 0,
+  institute REAL DEFAULT 0,
+  public_stake REAL DEFAULT 0,
+  fetched_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(ticker, month_year),
+  FOREIGN KEY (ticker) REFERENCES stocks(ticker) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shareholding_ticker ON shareholding_patterns(ticker);

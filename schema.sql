@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS stocks (
   sector TEXT NOT NULL,
   weight REAL NOT NULL DEFAULT 0,
   target_pe REAL NOT NULL,
+  justified_pe REAL DEFAULT 0,
+  beta REAL DEFAULT 1.0,
   pe_ratio REAL DEFAULT 0,
   eps REAL NOT NULL,
   bvps REAL DEFAULT 0,

@@ -75,6 +75,23 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
             const listedYear = json.au || null;
             const category = json.av || null;
             const dividendYield = json.cm || 0;
+            const bvps = json.ci || 0;
+            const dps = (dividendYield / 100) * currentPrice;
+            const roe = bvps > 0 ? (eps / bvps) : 0;
+            const payoutRatio = eps > 0 ? (dps / eps) : 0;
+            
+            // Wait, we need to get the stock's existing beta if json.cj is missing/0.
+            // But json.cj provides beta from Amarstock
+            const beta = json.cj || 1.0; 
+            const r = 0.105 + (beta * 0.06); // 10.5% risk free, 6% ERP
+            const g = roe * (1 - payoutRatio);
+            
+            let justifiedPe = 0;
+            if (r > g && eps > 0 && payoutRatio >= 0 && payoutRatio <= 1) {
+              justifiedPe = payoutRatio / (r - g);
+            } else if (payoutRatio > 1 && r > g) {
+              justifiedPe = 1.0 / (r - g);
+            }
 
             stmts.push(
               db.prepare(`
@@ -89,6 +106,14 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
                   listed_year = ?,
                   category = ?,
                   dividend_yield = ?,
+                  bvps = ?,
+                  dps = ?,
+                  roe = ?,
+                  payout_ratio = ?,
+                  beta = ?,
+                  justified_pe = ?,
+                  req_rate_of_return = ?,
+                  growth_rate = ?,
                   updated_at = datetime("now") 
                 WHERE ticker = ?
               `)
@@ -96,7 +121,9 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
                   json.ab || stock.ticker,
                   json.dp || stock.sector || 'Unknown',
                   eps, peRatio, low52, high52, 
-                  authCapCr, listedYear, category, dividendYield, stock.ticker
+                  authCapCr, listedYear, category, dividendYield, 
+                  bvps, dps, roe, payoutRatio, beta, justifiedPe, r, g,
+                  stock.ticker
                 )
             );
           }

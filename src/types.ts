@@ -11,8 +11,14 @@ export interface Stock {
   sector: string;
   weight: number;
   target_pe: number;
+  justified_pe: number;
+  beta: number;
   pe_ratio: number;
   eps: number;
+  bvps: number;
+  dps: number;
+  roe: number;
+  payout_ratio: number;
   fifty_two_week_low: number;
   fifty_two_week_high: number;
   auth_cap: number;

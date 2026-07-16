@@ -243,4 +243,15 @@ admin.post('/sync/fundamentals', async (c) => {
   return c.json({ success: true, count: stmts.length });
 });
 
+admin.post('/trigger-scrape', async (c) => {
+  try {
+    // Run the scraper asynchronously without blocking the response
+    c.executionCtx.waitUntil(scrapeDSE(c.env));
+    return c.json({ success: true, message: 'Scraper triggered successfully' });
+  } catch (error: any) {
+    console.error('Failed to trigger scraper:', error);
+    return c.json({ error: 'Failed to trigger scraper', details: error.message }, 500);
+  }
+});
+
 export default admin;

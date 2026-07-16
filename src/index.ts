@@ -18,10 +18,6 @@ app.route('/api/stocks', stocksRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/screener', stocksRoutes); // alias for backwards compatibility if needed
 
-app.get('/api/trigger-scrape', async (c) => {
-  await scrapeDSE(c.env);
-  return c.json({ success: true, message: 'Scraper triggered successfully' });
-});
 
 // Cron trigger for fetching prices
 export default {

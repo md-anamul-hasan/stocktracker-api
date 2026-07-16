@@ -2,6 +2,7 @@ export interface Env {
   DB: D1Database;
   JWT_SECRET: string;
   CORS_ORIGIN: string;
+  PROXY_API_KEY: string;
 }
 
 export interface Stock {

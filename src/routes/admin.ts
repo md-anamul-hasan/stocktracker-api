@@ -245,8 +245,8 @@ admin.post('/sync/fundamentals', async (c) => {
 
 admin.post('/trigger-scrape', async (c) => {
   try {
-    // Run the scraper asynchronously without    // Continue in background
-    c.env.DB.prepare('SELECT 1').first().then(() => scrapeDSE(c.env));
+    // Run the scraper asynchronously in the background
+    c.executionCtx.waitUntil(scrapeDSE(c.env, undefined, true));
     return c.json({ success: true, message: 'Scraper triggered successfully in the background' });
   } catch (error: any) {
     console.error('Manual scrape trigger failed:', error);

@@ -83,7 +83,6 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
             const roe = bvps > 0 ? (eps / bvps) : 0;
             const payoutRatio = eps > 0 ? (dps / eps) : 0;
             
-            // If user explicitly set beta in CMS, use it. Otherwise use Amarstock's beta.
             const beta = stock.beta && stock.beta !== 1.0 ? stock.beta : (json.cj || 1.0); 
             // Fetch risk_free_rate from DB (manual input), default to 0.105 if null
             const riskFreeRate = stock.risk_free_rate !== null && stock.risk_free_rate !== undefined ? stock.risk_free_rate : 0.105;
@@ -95,6 +94,15 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
               justifiedPe = payoutRatio / (r - g);
             } else if (payoutRatio > 1 && r > g) {
               justifiedPe = 1.0 / (r - g);
+            }
+            
+            // Calculate Total Equity and Net Income based on total shares
+            const totalShares = json.ar || 0;
+            let totalEquity = 0;
+            let netIncome = 0;
+            if (totalShares > 0) {
+              totalEquity = bvps * totalShares;
+              netIncome = eps * totalShares;
             }
 
             stmts.push(
@@ -118,6 +126,8 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
                   justified_pe = ?,
                   req_rate_of_return = ?,
                   growth_rate = ?,
+                  total_equity = CASE WHEN ? > 0 THEN ? ELSE total_equity END,
+                  net_income = CASE WHEN ? > 0 THEN ? ELSE net_income END,
                   updated_at = datetime("now") 
                 WHERE ticker = ?
               `)
@@ -127,6 +137,7 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
                   eps, peRatio, low52, high52, 
                   authCapCr, listedYear, category, dividendYield, 
                   bvps, dps, roe, payoutRatio, beta, justifiedPe, r, g,
+                  totalEquity, totalEquity, netIncome, netIncome,
                   stock.ticker
                 )
             );

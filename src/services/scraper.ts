@@ -31,15 +31,18 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
 
     let allStocks;
     if (specificTicker) {
-      allStocks = { results: [{ ticker: specificTicker, sector: 'Unknown', status: 'active' }] };
+      allStocks = await db.prepare("SELECT ticker, sector, status, risk_free_rate, beta FROM stocks WHERE ticker = ?").bind(specificTicker).all<any>();
+      if (allStocks.results.length === 0) {
+        allStocks = { results: [{ ticker: specificTicker, sector: 'Unknown', status: 'active', risk_free_rate: null }] };
+      }
     } else {
-      allStocks = await db.prepare("SELECT ticker, sector, status FROM stocks WHERE status = 'active'").all<{ticker: string, sector: string, status: string}>();
+      allStocks = await db.prepare("SELECT ticker, sector, status, risk_free_rate, beta FROM stocks WHERE status = 'active'").all<any>();
     }
     
     const stmts: any[] = [];
     const limit = pLimit(5); // Process up to 5 stocks concurrently
     
-    const scrapeTasks = allStocks.results.map(stock => limit(async () => {
+    const scrapeTasks = allStocks.results.map((stock: any) => limit(async () => {
       try {
         const response = await fetch(`https://www.amarstock.com/data/11bfa580-3cc4a8b9e57d/${stock.ticker}`, {
           headers: {
@@ -80,10 +83,11 @@ export async function scrapeDSE(env: Env, specificTicker?: string) {
             const roe = bvps > 0 ? (eps / bvps) : 0;
             const payoutRatio = eps > 0 ? (dps / eps) : 0;
             
-            // Wait, we need to get the stock's existing beta if json.cj is missing/0.
-            // But json.cj provides beta from Amarstock
-            const beta = json.cj || 1.0; 
-            const r = 0.105 + (beta * 0.06); // 10.5% risk free, 6% ERP
+            // If user explicitly set beta in CMS, use it. Otherwise use Amarstock's beta.
+            const beta = stock.beta && stock.beta !== 1.0 ? stock.beta : (json.cj || 1.0); 
+            // Fetch risk_free_rate from DB (manual input), default to 0.105 if null
+            const riskFreeRate = stock.risk_free_rate !== null && stock.risk_free_rate !== undefined ? stock.risk_free_rate : 0.105;
+            const r = riskFreeRate + (beta * 0.06); // Rf + ERP (6%)
             const g = roe * (1 - payoutRatio);
             
             let justifiedPe = 0;

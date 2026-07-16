@@ -85,6 +85,10 @@ stocks.get('/valuation/:ticker', async (c) => {
       return c.json({ detail: 'Invalid ticker or no data found' }, 404);
     }
 
+    const db = c.env.DB;
+    // Check for DB overrides
+    const dbStock = await db.prepare("SELECT beta, risk_free_rate FROM stocks WHERE ticker = ?").bind(ticker).first<any>();
+
     const currentPrice = json.ac || 0;
     const eps = json.cb || 0;
     const dividendYield = json.cm || 0;
@@ -93,8 +97,9 @@ stocks.get('/valuation/:ticker', async (c) => {
     const roe = bvps > 0 ? (eps / bvps) : 0;
     const payoutRatio = eps > 0 ? (dps / eps) : 0;
     
-    const beta = json.cj || 1.0; 
-    const r = 0.105 + (beta * 0.06); // 10.5% risk free, 6% ERP
+    const beta = dbStock?.beta && dbStock.beta !== 1.0 ? dbStock.beta : (json.cj || 1.0); 
+    const riskFreeRate = dbStock?.risk_free_rate !== null && dbStock?.risk_free_rate !== undefined ? dbStock.risk_free_rate : 0.105;
+    const r = riskFreeRate + (beta * 0.06); // Rf + ERP (6%)
     const g = roe * (1 - payoutRatio);
     
     let justifiedPe = 0;
@@ -137,7 +142,7 @@ stocks.get('/valuation/:ticker', async (c) => {
         verdict: verdict,
         as_of: new Date().toISOString().split('T')[0],
         assumptions_used: {
-          risk_free_rate: 0.105,
+          risk_free_rate: riskFreeRate,
           equity_risk_premium: 0.06,
           beta: beta
         }

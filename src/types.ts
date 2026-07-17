@@ -45,6 +45,18 @@ export interface Stock {
   free_cash_flow: number;
   category: string;
   dividend_yield: number;
+  ma_20: number;
+  ma_50: number;
+  ma_200: number;
+  atr_14: number;
+  swing_low_60: number;
+  swing_high_60: number;
+  avg_daily_turnover: number;
+  free_float: number;
+  floor_price: number;
+  own_median_pe: number;
+  own_std_pe: number;
+  stock_character: string;
   investment_thesis: string;
   status: string;
   shariah_compliant: number;

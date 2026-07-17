@@ -171,11 +171,91 @@ export async function scrapeDSE(env: Env, specificTicker?: string, forceSync: bo
           await db.batch(chunk);
       }
       console.log(`Scraper successfully executed ${stmts.length} statements for Amarstock update.`);
+      
+      // Secondary pass for technicals
+      const tickersToUpdate = allStocks.results.map((s: any) => s.ticker);
+      await computeTechnicals(db, tickersToUpdate);
+      console.log(`Successfully computed technical indicators for ${tickersToUpdate.length} stocks.`);
     } else {
       console.log('No active portfolio stocks found in the scraped data.');
     }
     
   } catch (error) {
     console.error('Scraper failed:', error);
+  }
+}
+
+async function computeTechnicals(db: any, tickers: string[]) {
+  const stmts: any[] = [];
+  for (const ticker of tickers) {
+    const history = await db.prepare('SELECT current_price, high, low, volume, fetched_at FROM price_data WHERE ticker = ? ORDER BY fetched_at DESC, id DESC LIMIT 200').bind(ticker).all();
+    
+    if (!history || history.results.length === 0) continue;
+    const data = history.results.reverse(); // Oldest to newest
+
+    const prices = data.map((d: any) => d.current_price);
+    const ma20 = prices.length >= 20 ? prices.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20 : 0;
+    const ma50 = prices.length >= 50 ? prices.slice(-50).reduce((a: number, b: number) => a + b, 0) / 50 : 0;
+    const ma200 = prices.length >= 200 ? prices.slice(-200).reduce((a: number, b: number) => a + b, 0) / 200 : 0;
+
+    let atr14 = 0;
+    if (data.length >= 14) {
+      let trSum = 0;
+      for (let i = data.length - 14; i < data.length; i++) {
+        const high = data[i].high || data[i].current_price;
+        const low = data[i].low || data[i].current_price;
+        const prevClose = i > 0 ? data[i-1].current_price : low;
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        trSum += tr;
+      }
+      atr14 = trSum / 14;
+    }
+
+    let rsi14 = 0;
+    if (data.length >= 15) {
+      let gains = 0;
+      let losses = 0;
+      for (let i = data.length - 14; i < data.length; i++) {
+        const change = data[i].current_price - data[i-1].current_price;
+        if (change > 0) gains += change;
+        else losses -= change;
+      }
+      const avgGain = gains / 14;
+      const avgLoss = losses / 14;
+      if (avgLoss === 0) rsi14 = 100;
+      else {
+        const rs = avgGain / avgLoss;
+        rsi14 = 100 - (100 / (1 + rs));
+      }
+    }
+
+    let swingLow60 = 0;
+    let swingHigh60 = 0;
+    if (data.length > 0) {
+      const recent60 = data.slice(-60);
+      swingLow60 = Math.min(...recent60.map((d: any) => d.low || d.current_price));
+      swingHigh60 = Math.max(...recent60.map((d: any) => d.high || d.current_price));
+    }
+
+    let avgTurnover = 0;
+    if (data.length > 0) {
+      const recent30 = data.slice(-30);
+      const totalTurnover = recent30.reduce((sum: number, d: any) => sum + ((d.volume || 0) * d.current_price), 0);
+      avgTurnover = totalTurnover / recent30.length;
+    }
+
+    stmts.push(db.prepare(`
+      UPDATE stocks SET 
+        ma_20 = ?, ma_50 = ?, ma_200 = ?, atr_14 = ?, 
+        rsi = ?, swing_low_60 = ?, swing_high_60 = ?, avg_daily_turnover = ?
+      WHERE ticker = ?
+    `).bind(ma20, ma50, ma200, atr14, rsi14, swingLow60, swingHigh60, avgTurnover, ticker));
+  }
+
+  if (stmts.length > 0) {
+    const chunkSize = 100;
+    for (let i = 0; i < stmts.length; i += chunkSize) {
+      await db.batch(stmts.slice(i, i + chunkSize));
+    }
   }
 }

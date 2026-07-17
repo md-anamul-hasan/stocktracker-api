@@ -1,0 +1,15 @@
+-- New computed columns (populated by scraper)
+ALTER TABLE stocks ADD COLUMN ma_20 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN ma_50 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN ma_200 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN atr_14 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN swing_low_60 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN swing_high_60 REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN avg_daily_turnover REAL DEFAULT 0;
+
+-- CMS-managed manual fields
+ALTER TABLE stocks ADD COLUMN free_float REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN floor_price REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN own_median_pe REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN own_std_pe REAL DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN stock_character TEXT DEFAULT 'balanced';

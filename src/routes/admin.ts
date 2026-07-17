@@ -81,6 +81,8 @@ admin.put('/stocks/:id', async (c) => {
         total_liabilities = COALESCE(?, total_liabilities), total_equity = COALESCE(?, total_equity), 
         current_assets = COALESCE(?, current_assets), current_liabilities = COALESCE(?, current_liabilities),
         net_income = COALESCE(?, net_income), free_cash_flow = COALESCE(?, free_cash_flow),
+        stock_character = COALESCE(?, stock_character), free_float = COALESCE(?, free_float),
+        floor_price = COALESCE(?, floor_price), own_median_pe = COALESCE(?, own_median_pe), own_std_pe = COALESCE(?, own_std_pe),
         updated_at = datetime('now')
       WHERE id = ?
     `).bind(
@@ -98,6 +100,11 @@ admin.put('/stocks/:id', async (c) => {
       body.current_liabilities !== undefined ? body.current_liabilities : null,
       body.net_income !== undefined ? body.net_income : null,
       body.free_cash_flow !== undefined ? body.free_cash_flow : null,
+      body.stock_character !== undefined ? body.stock_character : null,
+      body.free_float !== undefined ? body.free_float : null,
+      body.floor_price !== undefined ? body.floor_price : null,
+      body.own_median_pe !== undefined ? body.own_median_pe : null,
+      body.own_std_pe !== undefined ? body.own_std_pe : null,
       id
     );
 

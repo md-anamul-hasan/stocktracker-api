@@ -10,7 +10,19 @@ admin.use('*', authMiddleware);
 admin.get('/stocks', async (c) => {
   try {
     const db = c.env.DB;
-    const result = await db.prepare('SELECT * FROM stocks ORDER BY weight DESC').all<Stock>();
+    const result = await db.prepare(`
+      SELECT s.*, 
+             sh.sponsor_director as sh_sponsor, sh.govt as sh_govt, sh.foreign_stake as sh_foreign, sh.institute as sh_institute, sh.public_stake as sh_public
+      FROM stocks s
+      LEFT JOIN (
+        SELECT ticker, sponsor_director, govt, foreign_stake, institute, public_stake
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY month_year DESC, id DESC) as rn
+          FROM shareholding_patterns
+        ) WHERE rn = 1
+      ) sh ON s.ticker = sh.ticker
+      ORDER BY s.weight DESC
+    `).all<any>();
     return c.json(result.results);
   } catch (error) {
     return c.json({ error: 'Internal Server Error' }, 500);

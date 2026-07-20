@@ -1,5 +1,4 @@
 import { Env } from '../types';
-import pLimit from 'p-limit';
 
 export async function scrapeDSE(env: Env, specificTicker?: string, forceSync: boolean = false) {
   const db = env.DB;
@@ -27,7 +26,35 @@ export async function scrapeDSE(env: Env, specificTicker?: string, forceSync: bo
       }
     }
 
-    console.log(specificTicker ? `Fetching live data for ${specificTicker} from Amarstock...` : 'Fetching live data from Amarstock API...');
+    console.log(specificTicker ? `Fetching live data for ${specificTicker} from StockNow...` : 'Fetching live data from StockNow API...');
+
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
+
+    // Fetch Instruments
+    const instrRes = await fetch('https://stocknow.com.bd/api/v1/instruments', { headers });
+    if (!instrRes.ok) throw new Error(`StockNow instruments failed: ${instrRes.status}`);
+    const instruments = await instrRes.json() as any;
+
+    // Fetch Fundamentals
+    const hashRes = await fetch('https://stocknow.com.bd/api/v1/fundamentals-hash', { headers });
+    if (!hashRes.ok) throw new Error(`StockNow hash failed: ${hashRes.status}`);
+    const hash = await hashRes.text();
+    
+    const fundRes = await fetch(`https://stocknow.com.bd/api/v1/fundamentals?h=${hash}`, { headers });
+    if (!fundRes.ok) throw new Error(`StockNow fundamentals failed: ${fundRes.status}`);
+    const fundamentals = await fundRes.json() as any;
+
+    // Build fundamentals map by ticker
+    const fundMap: Record<string, any> = {};
+    for (const key of Object.keys(fundamentals)) {
+      if (Array.isArray(fundamentals[key])) {
+        for (const item of fundamentals[key]) {
+          if (!fundMap[item.code]) fundMap[item.code] = {};
+          fundMap[item.code][key] = item.meta_value;
+          fundMap[item.code][key + '_date'] = item.meta_date;
+        }
+      }
+    }
 
     let allStocks;
     if (specificTicker) {
@@ -40,129 +67,122 @@ export async function scrapeDSE(env: Env, specificTicker?: string, forceSync: bo
     }
     
     const stmts: any[] = [];
-    const limit = pLimit(5); // Process up to 5 stocks concurrently
     
-    const scrapeTasks = allStocks.results.map((stock: any) => limit(async () => {
+    for (const stock of allStocks.results) {
       try {
-        const response = await fetch(`https://www.amarstock.com/data/11bfa580-3cc4a8b9e57d/${stock.ticker}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
-          }
-        });
+        const inst = instruments[stock.ticker];
+        const fund = fundMap[stock.ticker] || {};
 
-        if (response.ok) {
-          const json = await response.json() as any;
-          const currentPrice = json.ac || 0;
+        if (!inst) {
+          console.log(`No instrument data found for ${stock.ticker}`);
+          continue;
+        }
+
+        const currentPrice = inst.close || 0;
           
-          if (currentPrice > 0) {
-            stmts.push(
-              db.prepare('INSERT INTO price_data (ticker, current_price, source, fetched_at) VALUES (?, ?, ?, datetime("now"))')
-                .bind(stock.ticker, currentPrice, 'AMARSTOCK')
-            );
-            
-            // Extract 52W Low/High
-            let low52 = 0;
-            let high52 = 0;
-            if (json.ah && typeof json.ah === 'string' && json.ah.includes('-')) {
-              const parts = json.ah.split('-');
-              low52 = parseFloat(parts[0].trim());
-              high52 = parseFloat(parts[1].trim());
-            }
+        if (currentPrice > 0) {
+          const changeAmount = currentPrice - (inst.ycp || currentPrice);
+          const changePercent = inst.ycp > 0 ? (changeAmount / inst.ycp) * 100 : 0;
+          
+          stmts.push(
+            db.prepare('INSERT INTO price_data (ticker, current_price, change_amount, change_percent, volume, high, low, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime("now"))')
+              .bind(stock.ticker, currentPrice, changeAmount, changePercent, inst.volume || 0, inst.high || 0, inst.low || 0, 'STOCKNOW')
+          );
+          
+          const low52 = inst.yearly_low || 0;
+          const high52 = inst.yearly_high || 0;
 
-            const eps = json.cb || 0;
-            const peRatio = json.cd || (eps > 0 ? currentPrice / eps : 0);
-            const nav = json.ci || 0;
-            
-            // Convert auth_cap from millions to crores
-            const rawAuthCap = json.ap || 0;
-            const authCapCr = rawAuthCap / 10; 
-            
-            // Paid up cap from millions to crores
-            const rawPaidUp = json.aq || 0;
-            const paidUp = rawPaidUp / 10;
-            
-            // Calculate Market Cap in Crores
-            const totalShares = json.ar || 0;
-            const marketCap = (currentPrice * totalShares) / 10000000;
+          const getFundVal = (key: string) => fund[key] ? parseFloat(fund[key]) : 0;
+          const getFundStr = (key: string) => fund[key] ? fund[key] : null;
 
-            const listedYear = json.au || null;
-            const category = json.av || null;
-            const dividendYield = json.cm || 0;
-            
-            // Calculate Derived Metrics
-            const faceValue = 10;
-            let dividendPercent = 0;
-            if (json.dz) {
-              const match = String(json.dz).match(/(\d+(?:\.\d+)?)%/);
-              if (match) {
-                dividendPercent = parseFloat(match[1]);
-              }
-            }
-            let dps = 0;
-            if (dividendPercent > 0) dps = faceValue * (dividendPercent / 100);
+          const eps = getFundVal('earning_per_share');
+          const peRatio = eps > 0 ? currentPrice / eps : 0;
+          const nav = getFundVal('net_asset_val_per_share');
+          const nocfps = getFundVal('nocf_per_share');
+          
+          const authCapCr = getFundVal('authorized_capital');
+          const paidUp = getFundVal('paid_up_capital');
+          
+          const totalShares = getFundVal('total_no_securities');
+          const marketCap = (currentPrice * totalShares) / 10000000;
 
-            let roe = 0;
-            if (nav !== 0 && eps !== 0) roe = (eps / nav);
+          const listedYear = getFundStr('listing_year');
+          const category = inst.category || null;
+          const floorPrice = inst.floor || getFundVal('floor') || 0;
+          
+          const pubStake = getFundVal('share_percentage_public');
+          const instStake = getFundVal('share_percentage_institute');
+          const foreignStake = getFundVal('share_percentage_foreign');
+          const sponsorStake = getFundVal('share_percentage_director');
+          const govtStake = getFundVal('share_percentage_govt');
+          
+          const freeFloat = pubStake + instStake + foreignStake;
+          
+          const faceValue = 10;
+          let cashDiv = getFundVal('cash_dividend');
+          let dps = 0;
+          if (cashDiv > 0) dps = faceValue * (cashDiv / 100);
+          
+          const dividendYield = currentPrice > 0 ? (dps / currentPrice) * 100 : 0;
+          
+          let roe = 0;
+          if (nav !== 0 && eps !== 0) roe = (eps / nav);
 
-            let payoutRatio = 0;
-            if (eps > 0 && dps > 0) payoutRatio = (dps / eps);
+          let payoutRatio = 0;
+          if (eps > 0 && dps > 0) payoutRatio = (dps / eps);
 
-            const beta = stock.beta || 1.0; 
-            const riskFreeRate = stock.risk_free_rate !== null && stock.risk_free_rate !== undefined ? stock.risk_free_rate : 0.105;
-            const r = riskFreeRate + (beta * 0.06); 
-            const g = roe * (1 - payoutRatio);
-            
-            let justifiedPe = 0;
-            if (r > g && eps > 0 && payoutRatio >= 0 && payoutRatio <= 1) {
-              justifiedPe = payoutRatio / (r - g);
-            } else if (payoutRatio > 1 && r > g) {
-              justifiedPe = 1.0 / (r - g);
-            }
-            
-            stmts.push(
-              db.prepare(`
-                UPDATE stocks SET 
-                  company_name = ?,
-                  eps = ?, 
-                  pe_ratio = ?, 
-                  fifty_two_week_low = ?, 
-                  fifty_two_week_high = ?, 
-                  paid_up_cap = ?,
-                  market_cap = ?,
-                  auth_cap = ?,
-                  listed_year = ?,
-                  category = COALESCE(?, category),
-                  dividend_yield = ?,
-                  nav = ?,
-                  dps = ?,
-                  roe = ?,
-                  payout_ratio = ?,
-                  beta = ?,
-                  justified_pe = ?,
-                  req_rate_of_return = ?,
-                  growth_rate = ?,
-                  rsi = 0,
-                  macd = 0,
-                  updated_at = datetime("now") 
-                WHERE ticker = ?
-              `)
-                .bind(
-                  json.ab || stock.ticker,
-                  eps, peRatio, low52, high52, 
-                  paidUp, marketCap, authCapCr, listedYear, category, dividendYield, 
-                  nav, dps, roe, payoutRatio, beta, justifiedPe, r, g,
-                  stock.ticker
-                )
-            );
+          const beta = stock.beta || 1.0; 
+          const riskFreeRate = stock.risk_free_rate !== null && stock.risk_free_rate !== undefined ? stock.risk_free_rate : 0.105;
+          const r = riskFreeRate + (beta * 0.06); 
+          const g = roe * (1 - payoutRatio);
+          
+          let justifiedPe = 0;
+          if (r > g && eps > 0 && payoutRatio >= 0 && payoutRatio <= 1) {
+            justifiedPe = payoutRatio / (r - g);
+          } else if (payoutRatio > 1 && r > g) {
+            justifiedPe = 1.0 / (r - g);
+          }
+          
+          stmts.push(
+            db.prepare(`
+              UPDATE stocks SET 
+                company_name = ?, eps = ?, pe_ratio = ?, 
+                fifty_two_week_low = ?, fifty_two_week_high = ?, 
+                paid_up_cap = ?, market_cap = ?, auth_cap = ?,
+                listed_year = ?, category = COALESCE(?, category),
+                dividend_yield = ?, nav = ?, dps = ?,
+                roe = ?, payout_ratio = ?, beta = ?,
+                justified_pe = ?, req_rate_of_return = ?, growth_rate = ?,
+                nocfps = ?, floor_price = ?, free_float = ?,
+                rsi = 0, macd = 0, updated_at = datetime("now") 
+              WHERE ticker = ?
+            `)
+              .bind(
+                inst.name || stock.ticker, eps, peRatio, low52, high52, 
+                paidUp, marketCap, authCapCr, listedYear, category, dividendYield, 
+                nav, dps, roe, payoutRatio, beta, justifiedPe, r, g,
+                nocfps, floorPrice, freeFloat,
+                stock.ticker
+              )
+          );
+          
+          // Shareholding Patterns
+          const shDate = fund['share_percentage_director_date'] || fund['share_percentage_public_date'];
+          if (shDate) {
+              const monthYear = shDate.substring(0, 7); // YYYY-MM
+              stmts.push(
+                db.prepare(`
+                  INSERT OR IGNORE INTO shareholding_patterns 
+                  (ticker, month_year, sponsor_director, govt, foreign_stake, institute, public_stake)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)
+                `).bind(stock.ticker, monthYear, sponsorStake, govtStake, foreignStake, instStake, pubStake)
+              );
           }
         }
       } catch (e) {
-        console.error(`Failed to fetch data for ${stock.ticker}`, e);
+        console.error(`Failed to process data for ${stock.ticker}`, e);
       }
-    }));
-
-    await Promise.all(scrapeTasks);
+    }
 
     if (stmts.length > 0) {
       const chunkSize = 100;
@@ -170,7 +190,7 @@ export async function scrapeDSE(env: Env, specificTicker?: string, forceSync: bo
           const chunk = stmts.slice(i, i + chunkSize);
           await db.batch(chunk);
       }
-      console.log(`Scraper successfully executed ${stmts.length} statements for Amarstock update.`);
+      console.log(`Scraper successfully executed ${stmts.length} statements for StockNow update.`);
       
       // Secondary pass for technicals
       const tickersToUpdate = allStocks.results.map((s: any) => s.ticker);

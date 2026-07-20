@@ -34,15 +34,9 @@ stocks.get('/screener', async (c) => {
     const db = c.env.DB;
     
     const result = await db.prepare(`
-        SELECT s.ticker, s.company_name, s.sector, s.eps, s.target_pe, s.justified_pe, s.beta, s.weight, s.investment_thesis, s.status,
-                s.pe_ratio, s.fifty_two_week_low, s.fifty_two_week_high,
-                s.auth_cap, s.paid_up_cap, s.market_cap, s.credit_rating,
-                s.rsi, s.macd, s.nav, s.current_ratio, s.quick_ratio, s.debt_to_equity, s.roa,
-                s.asset_turnover, s.inventory_turnover, s.cash_conversion_cycle,
-                s.listed_year, s.category, s.dividend_yield,
-                s.growth_rate, s.total_liabilities, s.total_equity, s.current_assets, s.current_liabilities, s.net_income, s.free_cash_flow,
-                s.roe, s.payout_ratio,
-                COALESCE(p.current_price, s.eps * s.target_pe) as current_price
+        SELECT s.*,
+                COALESCE(p.current_price, s.eps * s.target_pe) as current_price,
+                sh.sponsor_director as sh_sponsor, sh.govt as sh_govt, sh.foreign_stake as sh_foreign, sh.institute as sh_institute, sh.public_stake as sh_public
         FROM stocks s
         LEFT JOIN (
           SELECT ticker, current_price
@@ -51,6 +45,13 @@ stocks.get('/screener', async (c) => {
             FROM price_data
           ) WHERE rn = 1
         ) p ON s.ticker = p.ticker
+        LEFT JOIN (
+          SELECT ticker, sponsor_director, govt, foreign_stake, institute, public_stake
+          FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY month_year DESC, id DESC) as rn
+            FROM shareholding_patterns
+          ) WHERE rn = 1
+        ) sh ON s.ticker = sh.ticker
       `).all<any>();
 
       const enhancedStocks = result.results.map(row => {
@@ -115,68 +116,48 @@ stocks.get('/valuation/:ticker', async (c) => {
         beta = result.beta || 1;
         riskFreeRate = result.risk_free_rate || 0.105;
     } else {
-        // Fallback: Fetch from LankaBangla on the fly for stocks not in DB
-        const homeRes = await fetch('https://lankabd.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const homeHtml = await homeRes.text();
-        const tokenMatch = homeHtml.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/);
-        const token = tokenMatch ? tokenMatch[1] : '';
-        const cookies = homeRes.headers.get('set-cookie') || '';
-        const apiHeaders = { 'User-Agent': 'Mozilla/5.0', 'RequestVerificationToken': token, 'Cookie': cookies, 'Accept': 'application/json' };
+        // Fallback: Fetch from StockNow on the fly for stocks not in DB
+        const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
         
-        // Find company ID
-        let cid = null;
-        for(let sectorId = 1; sectorId <= 30; sectorId++) {
-            try {
-                const res = await fetch(`https://lankabd.com/api/APIDropDown/GetAllSymbolBySector?cid=${sectorId}`, { headers: apiHeaders });
-                if(res.ok){
-                    const data = await res.json() as any[];
-                    const found = data.find((s:any) => s.symbol === ticker);
-                    if (found && found.companyID) {
-                        cid = found.companyID;
-                        break;
-                    }
-                }
-            } catch(e) {}
-        }
-
-        if (!cid) {
-             return c.json({ detail: 'Stock not found in database and could not be found on LankaBangla.' }, 404);
-        }
-
-        // Fetch market data and fundamentals
-        const [ mkDataRes, interimFinRes, divHistRes, finRatiosRes, techIndRes ] = await Promise.all([
-          fetch(`https://lankabd.com/api/Company/LatestMkDataSymbol?cid=${cid}`, { headers: apiHeaders }),
-          fetch(`https://lankabd.com/api/company/StatsInterimFinReport?cid=${cid}`, { headers: apiHeaders }),
-          fetch(`https://lankabd.com/api/company/StatsDividendHistory?cid=${cid}`, { headers: apiHeaders }),
-          fetch(`https://lankabd.com/api/company/FinancialRatiosV2?cid=${cid}`, { headers: apiHeaders }),
-          fetch(`https://lankabd.com/api/company/TechnicalIndicators?cid=${cid}`, { headers: apiHeaders })
-        ]);
-
-        const mkData = await mkDataRes.json().catch(()=>({})) as any;
-        const interimFin = await interimFinRes.json().catch(()=>[]) as any[];
-        const divHist = await divHistRes.json().catch(()=>[]) as any[];
-        const finRatios = await finRatiosRes.json().catch(()=>[]) as any[];
-        const techInd = await techIndRes.json().catch(()=>({})) as any;
-
-        currentPrice = mkData.lastTradedPrice || mkData.mkistaT_OPEN_PRICE || 0;
+        const instrRes = await fetch('https://stocknow.com.bd/api/v1/instruments', { headers });
+        if (!instrRes.ok) return c.json({ detail: 'Failed to fetch instruments from StockNow.' }, 500);
+        const instruments = await instrRes.json() as any;
+        const inst = instruments[ticker];
         
-        let nav = 0;
-        if (interimFin && interimFin.length > 0 && divHist && divHist.length > 0) {
-            eps = divHist[0].eps || 0;
-            nav = divHist[0].nav || 0;
-        } else if (divHist && divHist.length > 0) {
-            eps = divHist[0].eps || 0;
-            nav = divHist[0].nav || 0;
+        if (!inst) {
+             return c.json({ detail: 'Stock not found in database and could not be found on StockNow.' }, 404);
         }
 
-        const divYieldRatio = Array.isArray(finRatios) ? finRatios.find((rat: any) => rat.ratioList?.some((l: any) => l.Name === "Dividend Yield "))?.ratioList.find((l:any) => l.Name === "Dividend Yield ") : null;
-        const dividendYield = divYieldRatio ? divYieldRatio.Result * 100 : (divHist && divHist.length > 0 ? (divHist[0].cashDividend || 0) : 0);
-        const dps = (dividendYield / 100) * currentPrice;
+        const hashRes = await fetch('https://stocknow.com.bd/api/v1/fundamentals-hash', { headers });
+        if (!hashRes.ok) return c.json({ detail: 'Failed to fetch fundamentals hash from StockNow.' }, 500);
+        const hash = await hashRes.text();
+        
+        const fundRes = await fetch(`https://stocknow.com.bd/api/v1/fundamentals?h=${hash}`, { headers });
+        if (!fundRes.ok) return c.json({ detail: 'Failed to fetch fundamentals from StockNow.' }, 500);
+        const fundamentals = await fundRes.json() as any;
+        
+        const fund: Record<string, string> = {};
+        for (const key of Object.keys(fundamentals)) {
+          if (Array.isArray(fundamentals[key])) {
+            const item = fundamentals[key].find((x: any) => x.code === ticker);
+            if (item) fund[key] = item.meta_value;
+          }
+        }
+
+        const getFundVal = (key: string) => fund[key] ? parseFloat(fund[key]) : 0;
+
+        currentPrice = inst.close || 0;
+        eps = getFundVal('earning_per_share');
+        let nav = getFundVal('net_asset_val_per_share');
+        
+        let cashDiv = getFundVal('cash_dividend');
+        let dps = 0;
+        if (cashDiv > 0) dps = 10 * (cashDiv / 100); // Face value 10
         
         const roe = eps > 0 && nav > 0 ? (eps/nav) : 0;
-        payoutRatio = eps > 0 ? (dps / eps) : 0;
+        payoutRatio = eps > 0 && dps > 0 ? (dps / eps) : 0;
         
-        beta = techInd.beta_Daily || 1.0; 
+        beta = 1.0; 
         riskFreeRate = 0.105;
         r = riskFreeRate + (beta * 0.06); 
         g = roe * (1 - payoutRatio);
